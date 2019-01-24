@@ -6,7 +6,7 @@
 ;; URL: https://github.com/sebasmonia/panda
 ;; Package-Requires: ((emacs "25"))
 ;; Version: 0.5
-;; Keywords: bamboo devops build
+;; Keywords: maint tool
 
 ;; This file is not part of GNU Emacs.
 
