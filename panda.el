@@ -84,6 +84,8 @@
 (defvar panda--auth-string nil)
 (defvar panda--projects-cache nil)
 (defvar panda--plans-cache nil)
+;; buffer local for build-status-mode buffers
+(defvar panda--branch-key nil)
 
 ;; Unlike the list of projects and plans, the branch cache
 ;; is built as needed. It gets cleared on refresh.
@@ -100,7 +102,7 @@
 (defun panda--log (&rest to-log)
   "Append TO-LOG to the log buffer.  Intended for internal use only."
   (let ((log-buffer (get-buffer-create "*panda log*"))
-        (text (reduce (lambda (accum elem) (concat accum " " (prin1-to-string elem t))) to-log)))
+        (text (cl-reduce (lambda (accum elem) (concat accum " " (prin1-to-string elem t))) to-log)))
     (with-current-buffer log-buffer
       (goto-char (point-max))
       (insert text)
@@ -298,7 +300,7 @@
 (defun panda-queue-build (&optional plan)
   "Queue a build.  If PLAN is not provided, select it interactively."
   (interactive)
-  (destructuring-bind (project-key plan-key branch-key) (panda--select-ppb nil plan)
+  (destructuring-bind (_project-key plan-key branch-key) (panda--select-ppb nil plan)
     (when (equal branch-key (concat plan-key "0"))
       ;; the base plan has a branch number of 0 but
       ;; won't build if using the prefix num
@@ -310,7 +312,7 @@
 If PLAN is not provided, select it interactively.
 The amount of builds to retrieve is controlled by 'panda-latest-max'."
   (interactive)
-  (destructuring-bind (project-key plan-key branch-key) (panda--select-ppb nil plan)
+  (destructuring-bind (_project-key _plan-key branch-key) (panda--select-ppb nil plan)
     (panda-build-results-branch branch-key)))
 
 (defun panda-build-results-branch (branch)
