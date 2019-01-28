@@ -39,6 +39,8 @@
 ;;                      plan and branch
 ;;   panda-build-results: gets the last 7 (by default) builds for a particular
 ;;                        branch.
+;;   panda-queue-deploy: starts a new deploy, interactively requests a plan,
+;;                       environment and deploy.
 ;;
 ;;   Non interactive:
 ;;   panda-build-results-branch: if you know you branch key you can call this
