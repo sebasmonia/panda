@@ -69,18 +69,25 @@
   "Display less messages in the echo area."
   :type 'boolean)
 
+
+(defcustom panda-log-responses nil
+  "Display API responses in the log.
+Extremely useful for debugging but way too verbose sometimes."
+  :type 'boolean)
+
 ;; consider making this an independent parameter
 ;; for builds and deployments
 (defcustom panda-latest-max-results 7
   "How many items to retrieve when pulling lists of \"latest items\"."
   :type 'integer)
 
-;; TODO Maybe v2 as needs replacement
-;; for url-insert-file-contents (doesnt support
-;; the "silent" param)
-;; (defcustom panda-silence-url t
-;;   "Ask url.el not to show messages."
-;;   :type 'boolean)
+(defcustom panda-silence-url t
+   "Ask url.el not to show messages."
+   :type 'boolean)
+
+(defcustom panda-api-timeout 30
+   "Timeout for Bamboo API calls, in seconds."
+   :type 'integer)
 
 (defvar panda--auth-string nil)
 (defvar panda--projects-cache nil)
@@ -120,33 +127,29 @@
 
 ;;------------------HTTP Stuff----------------------------------------------------
 
-(defun panda--fetch-json (method &optional params)
-  "Retrieve JSON result of calling METHOD with PARAMS.  Return parsed objects."
+(defun panda--api-call (api-url &optional params method)
+  "Retrieve JSON result of calling API-URL with PARAMS using METHOD (default GET).  Return parsed objects."
   ;; Modified from https://stackoverflow.com/a/15119407/91877
   (let ((url-request-extra-headers
          `(("Accept" . "application/json")
            ("Authorization" . ,(panda--auth-header))))
-        (url-to-get (concat panda-base-url method "?os_authType=basic"))
+        (url-to-get (concat panda-base-url api-url "?os_authType=basic"))
+        (url-request-method (or method "GET"))
         (json-false :false))
     (when params
       (setq url-to-get (concat url-to-get "&" params)))
     (panda--log "Fetch JSON URL:" url-to-get)
-    (with-temp-buffer
-      (url-insert-file-contents url-to-get)
-      (goto-char (point-min))
-      (json-read))))
-
-(defun panda--run-action (method &optional params)
-  "Make a POST request to METHOD with PARAMS.  Return parsed objects."
-  (let ((url-request-method "POST")
-        (url-request-extra-headers
-         `(("Authorization" . ,(panda--auth-header))))
-        (url-to-post (concat panda-base-url method "?os_authType=basic"))
-        (json-false :false))
-    (when params
-      (setq url-to-post (concat url-to-post "&" params)))
-    (panda--log "Run action URL:" url-to-post)
-    (url-retrieve-synchronously url-to-post)))
+    (with-current-buffer (url-retrieve-synchronously url-to-get panda-silence-url nil panda-api-timeout)
+      (when panda-log-responses
+        (panda--log "JSON Response: " (buffer-string)))
+      (goto-char url-http-end-of-headers)
+      (let ((data nil))
+        (ignore-errors
+          ;; if there's a problem parsing the JSON
+          ;; data ==> nil
+          (setq data (json-read)))
+        (kill-buffer) ;; don't litter with API buffers
+        data))))
 
 (defun panda--auth-header ()
   "Return the auth header.  Caches credentials per-session."
@@ -207,7 +210,7 @@
   (interactive)
   (panda--message "Refreshing Bamboo project and plan cache...")
   ;; If you have more than 10000 projects I doubt you are using this package
-  (let* ((response (panda--fetch-json "/project" "expand=projects.project.plans&max-results=10000"))
+  (let* ((response (panda--api-call "/project" "expand=projects.project.plans&max-results=10000"))
          ;; convert vector to list
          (data (append (panda--json-nav '(projects project) response) nil))
          (project nil)
@@ -240,7 +243,7 @@
   (let ((in-cache (panda--agetstr plan-key panda--branches-cache)))
     (unless in-cache
       (panda--message "Caching branches for plan...")
-      (let* ((data (panda--fetch-json (concat "/plan/" plan-key "/branch")))
+      (let* ((data (panda--api-call (concat "/plan/" plan-key "/branch")))
              (branches-data (panda--json-nav '(branches branch) data))
              (branches (panda--get-pairs 'shortName 'key branches-data)))
         (panda--log (prin1-to-string branches))
@@ -267,11 +270,11 @@
   "Get the deploy data for a PLAN-KEY.
 This requires two API calls, one to get the project id and another for the
 actual deployments."
-  (let* ((raw (panda--fetch-json "/deploy/project/forPlan"
+  (let* ((raw (panda--api-call "/deploy/project/forPlan"
                                  (concat "planKey=" plan-key)))
          (did (alist-get 'id (elt raw 0)))
          (proj-url (format "/deploy/project/%s" did))
-         (data (panda--fetch-json proj-url))
+         (data (panda--api-call proj-url))
          (envs (panda--format-deploy-data (alist-get 'environments data))))
     (cons plan-key (cons did envs))))
 
@@ -333,7 +336,7 @@ actual deployments."
          (branch-name (mapconcat 'identity (butlast split-data) "_")))
     (unless (string-equal branch-name "develop")
       (setq plan-key (panda--agetstr branch-name (panda--branches plan-key))))
-    (panda--fetch-json (concat "/result/" plan-key "-" build-number))))
+    (panda--api-call (concat "/result/" plan-key "-" build-number))))
 
 ;; TODO move to deploy-status
 (defun panda-get-build-date (build-name plan-key)
@@ -352,7 +355,7 @@ actual deployments."
       ;; the base plan has a branch number of 0 but
       ;; won't build if using the prefix num
       (setq branch-key plan-key))
-    (panda--run-action (concat "/queue/" branch-key))))
+    (panda--api-call (concat "/queue/" branch-key) nil "POST")))
 
 (defun panda-build-results (&optional plan)
   "Fetch the build results for a branch under PLAN.
@@ -395,14 +398,14 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
     (let* ((target-url (concat "/result/" branch-key))
            (parameters (concat "max-results=" (number-to-string panda-latest-max-results)
                                "&includeAllStates=true"))
-           (data (panda--fetch-json target-url parameters))
+           (data (panda--api-call target-url parameters))
            (build-results (panda--json-nav '(results result) data)))
       (mapcar (lambda (build) (alist-get 'key build))
               build-results)))
 
 (defun panda--fetch-build-bykey (build-key)
   "Return the data for BUILD-KEY formatted for tabulated mode."
-  (let* ((build-data (panda--fetch-json (concat "/result/" build-key)))
+  (let* ((build-data (panda--api-call (concat "/result/" build-key)))
          (filtered-data (panda--extract-alist '(key state prettyBuildStartedTime prettyBuildCompletedTime
                                                     buildDurationDescription)
                                               build-data)))
@@ -432,17 +435,17 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                                                   (mapcar 'first deploy-data)))
            (selected-environment (ido-completing-read "Select an environment: "
                                                       (mapcar 'first environments))))
-      (panda--run-action "/queue/deployment"
+      (panda--api-call "/queue/deployment"
                          (format "environmentId=%s&versionId=%s"
                                  (car (panda--agetstr selected-environment environments))
-                                 (car (panda--agetstr selected-release deploy-data)))))))
-
+                                 (car (panda--agetstr selected-release deploy-data)))
+                         "POST"))))
 
 (defun panda--deploys-for-id (did)
   "Get the deployments of a DID (deployment id)."
   (let* ((url (format "/deploy/project/%s/versions" did))
          (parameters (format "max-results=%s" panda-latest-max-results))
-         (data (panda--fetch-json url parameters))
+         (data (panda--api-call url parameters))
          (deploys (alist-get 'versions data)))
     (mapcar
      (lambda (dep) (panda--extract-alist '(name id) dep))
