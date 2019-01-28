@@ -69,7 +69,8 @@
   "Display less messages in the echo area."
   :type 'boolean)
 
-
+;; consider making this an independent parameter
+;; for builds and deployments
 (defcustom panda-latest-max-results 7
   "How many items to retrieve when pulling lists of \"latest items\"."
   :type 'integer)
@@ -84,12 +85,21 @@
 (defvar panda--auth-string nil)
 (defvar panda--projects-cache nil)
 (defvar panda--plans-cache nil)
-;; buffer local for build-status-mode buffers
-(defvar panda--branch-key nil)
-
 ;; Unlike the list of projects and plans, the branch cache
 ;; is built as needed. It gets cleared on refresh.
 (defvar panda--branches-cache nil)
+
+;; The information on all deployments is read  as needed,
+;; we need one call to get the project id, and another to get
+;; the environments, the alternative is "/deploy/project/all"
+;; but that fetches A TON of data at onces.
+;;  It's worth considering using that approach but for now
+;; this seems leaner, although more complex.
+(defvar panda--deploys-cache nil)
+
+;; buffer local for build-status-mode buffers
+(defvar panda--branch-key nil)
+
 
 ;;------------------Package infrastructure----------------------------------------
 
@@ -240,6 +250,35 @@
         (panda--message "Caching branches for plan...")))
     in-cache))
 
+(defun panda--deploys (plan-key)
+  "Get cached list of deployments for a PLAN-KEY, fetch and cache if needed."
+  (let ((in-cache (panda--agetstr plan-key panda--deploys-cache)))
+    (unless in-cache
+      (panda--message "Caching deploys for plan...")
+      ;; gross misuse of in-cache to temp hold the object
+      ;; retrieve from the API call
+      (setq in-cache (panda--get-plan-deploys plan-key))
+      (push in-cache panda--deploys-cache)
+      ;; format to return
+      (setq in-cache (cdr in-cache)))
+    in-cache))
+
+(defun panda--get-plan-deploys (plan-key)
+  "Get the deploy data for a PLAN-KEY.
+This requires two API calls, one to get the project id and another for the
+actual deployments."
+  (let* ((raw (panda--fetch-json "/deploy/project/forPlan"
+                                 (concat "planKey=" plan-key)))
+         (did (alist-get 'id (elt raw 0)))
+         (proj-url (format "/deploy/project/%s" did))
+         (data (panda--fetch-json proj-url))
+         (envs (panda--format-deploy-data (alist-get 'environments data))))
+    (cons plan-key (cons did envs))))
+
+(defun panda--format-deploy-data (deploy-data)
+  "Format the information DEPLOY-DATA for caching."
+  (mapcar (lambda (elem) (panda--extract-alist '(name id) elem))
+          deploy-data))
 
 ;;------------------Common UI utilities-------------------------------------------
 
@@ -257,7 +296,6 @@
                                         (mapcar 'first plans))))
     (panda--agetstr selected plans)))
 
-
 (defun panda--select-branch (plan-key)
   "Run 'ido-completing-read' to select a plan under PLAN-KEY  Return the branch key."
   (let* ((branches (panda--branches plan-key))
@@ -274,6 +312,15 @@
          (plan-key (or plan (panda--select-plan project-key)))
          (branch-key (panda--select-branch plan-key)))
     (list project-key plan-key branch-key)))
+
+(defun panda--select-pp (&optional project plan)
+  "Run the functions to select the PROJECT and PLAN and return the keys in a list.  If provided PROJECT won't be prompted."
+  ;; if the plan is provided skip the project when not set
+  (when (and (not project) plan)
+    (setq project "--"))
+  (let* ((project-key (or project (panda--select-project)))
+         (plan-key (or plan (panda--select-plan project-key))))
+    (list project-key plan-key)))
 
 
 ;;------------------Build querying and information--------------------------------
@@ -362,7 +409,6 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
     ;; tabulated list requires a list with an ID and a vector
     (list (car filtered-data) (vconcat filtered-data))))
 
-
 (define-derived-mode panda--build-results-mode tabulated-list-mode "Panda build results view" "Major mode to display Bamboo's build results."
   (setq tabulated-list-format [("Build key" 20 nil)
                                ("State" 11 nil)
@@ -373,7 +419,35 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
   (setq tabulated-list-padding 1)
   (tabulated-list-init-header))
 
-;; panda-deploy (build) or plan?
+;;------------------Creating deployments and pushing them-------------------------
+(defun panda-queue-deploy (&optional plan)
+  "Queue a deploy.  If PLAN is not provided, select it interactively."
+  (interactive)
+  (destructuring-bind (_project-key plan-key) (panda--select-pp nil plan)
+    (let* ((metadata (panda--deploys plan-key))
+           (did (car metadata))
+           (environments (cdr metadata))
+           (deploy-data (panda--deploys-for-id did))
+           (selected-release (ido-completing-read "Select release: "
+                                                  (mapcar 'first deploy-data)))
+           (selected-environment (ido-completing-read "Select an environment: "
+                                                      (mapcar 'first environments))))
+      (panda--run-action "/queue/deployment"
+                         (format "environmentId=%s&versionId=%s"
+                                 (car (panda--agetstr selected-environment environments))
+                                 (car (panda--agetstr selected-release deploy-data)))))))
+
+
+(defun panda--deploys-for-id (did)
+  "Get the deployments of a DID (deployment id)."
+  (let* ((url (format "/deploy/project/%s/versions" did))
+         (parameters (format "max-results=%s" panda-latest-max-results))
+         (data (panda--fetch-json url parameters))
+         (deploys (alist-get 'versions data)))
+    (mapcar
+     (lambda (dep) (panda--extract-alist '(name id) dep))
+     deploys)))
+;(build) or plan?
 ;; panda-deploy-status
 
 (provide 'panda)
