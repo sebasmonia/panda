@@ -5,7 +5,7 @@
 ;; Author: Sebastian Monia <smonia@outlook.com>
 ;; URL: https://github.com/sebasmonia/panda
 ;; Package-Requires: ((emacs "25"))
-;; Version: 0.5
+;; Version: 0.9
 ;; Keywords: maint tool
 
 ;; This file is not part of GNU Emacs.
@@ -25,12 +25,16 @@
 ;;      - No trailing / -
 ;;   3. Optionally, customize or manually set panda-username if you don't want
 ;;      to enter your user name on each session
+;;   4. There's a keymay provided for convenience
+;;       (require 'panda)
+;;        (global-set-key (kbd "C-c b") 'panda-map) ;; b for "Bamboo"
 ;;
 ;;   The first request to Bamboo will ask for user/pass and then cache them in
 ;;   memory as long as Emacs is open.  The information on the projects and plans
-;;   is retrieved once and cached for the session.  Call panda-refresh-cache to
-;;   for a refresh.  Branches for each plan are cached as required.
-;;   There are no default key bindings yet (a keymap is in the roadmap)
+;;   is retrieved once and cached for the session.  Branches for each plan are
+;;   cached as required.  Information about the deployment projects is cached
+;;   at once too.  Call panda-refresh-cache to force a reload of all items.
+;;
 ;;   The commands supported in this version are:
 ;;
 ;;   Interactive:
@@ -41,13 +45,16 @@
 ;;                        branch.
 ;;   panda-queue-deploy: starts a new deploy, interactively requests a plan,
 ;;                       environment and deploy.
+;;   panda-deploy-status: gets the status of all environments for a deploy
+;;                        project.
+;;   panda-clear-credentials: force inputting user/pass in the next API call.
+;;   panda-refresh-cache: re-fetch list of build plans and deploy projects.
 ;;
 ;;   Non interactive:
 ;;   panda-build-results-branch: if you know you branch key you can call this
 ;;                               function from elisp to display the build status
 ;;
-;;   In the roadmap: create deploys from builds, check deploy status, queue deploy,
-;;                   provide a keymap, improve documentation
+;;   In the roadmap: create deploys from builds, improve documentation
 
 ;;; Code:
 
@@ -71,10 +78,9 @@
   "Display less messages in the echo area."
   :type 'boolean)
 
-
 (defcustom panda-log-responses nil
   "Display API responses in the log.
-Extremely useful for debugging but way too verbose sometimes."
+Extremely useful for debugging but way too verbose for every day use."
   :type 'boolean)
 
 ;; consider making this an independent parameter
@@ -91,24 +97,23 @@ Extremely useful for debugging but way too verbose sometimes."
    "Timeout for Bamboo API calls, in seconds."
    :type 'integer)
 
-(defvar panda--auth-string nil)
-(defvar panda--projects-cache nil)
-(defvar panda--plans-cache nil)
-;; Unlike the list of projects and plans, the branch cache
-;; is built as needed. It gets cleared on refresh.
-(defvar panda--branches-cache nil)
+(defvar panda--auth-string nil "Caches the credentials for API calls.")
+(defvar panda--projects-cache nil "Caches all the build projects the user has access to, in one go.")
+(defvar panda--plans-cache nil "Caches the plans for each build project the user has access to, in one go.")
+(defvar panda--branches-cache nil "Caches the branches for each plan, as they are requested.")
+(defvar panda--deploys-cache nil "Caches the deployment projects (not build projects) in one single call to /deploy/project/all.")
 
-;; The information on all deployments is read  as needed,
-;; we need one call to get the project id, and another to get
-;; the environments, the alternative is "/deploy/project/all"
-;; but that fetches A TON of data at onces.
-;;  It's worth considering using that approach but for now
-;; this seems leaner, although more complex.
-(defvar panda--deploys-cache nil)
+(defvar panda--branch-key nil "Buffer local variable for panda--build-status-mode.")
+(defvar panda--project-name nil "Buffer local variable for panda--deploy-results-mode.")
 
-;; buffer local for build-status-mode buffers
-(defvar panda--branch-key nil)
-
+(define-prefix-command 'panda-map)
+(define-key panda-map (kbd "q b") 'panda-queue-build)
+(define-key panda-map (kbd "q d") 'panda-queue-deploy)
+(define-key panda-map (kbd "s b") 'panda-build-results)
+(define-key panda-map (kbd "s d") 'panda-deploy-status)
+(define-key panda-map (kbd "r") 'panda-refresh-cache)
+; Interactive commands not mapped:
+;; panda-clear-credentials
 
 ;;------------------Package infrastructure----------------------------------------
 
@@ -116,11 +121,11 @@ Extremely useful for debugging but way too verbose sometimes."
   "Show a TEXT as a message and log it, if 'panda-less-messages' log only."
   (unless panda-less-messages
     (message text))
-  (panda--log text))
+  (panda--log "Package message:" text "\n"))
 
 (defun panda--log (&rest to-log)
   "Append TO-LOG to the log buffer.  Intended for internal use only."
-  (let ((log-buffer (get-buffer-create "*panda log*"))
+  (let ((log-buffer (get-buffer-create "*panda-log*"))
         (text (cl-reduce (lambda (accum elem) (concat accum " " (prin1-to-string elem t))) to-log)))
     (with-current-buffer log-buffer
       (goto-char (point-max))
@@ -132,6 +137,8 @@ Extremely useful for debugging but way too verbose sometimes."
 (defun panda--api-call (api-url &optional params method)
   "Retrieve JSON result of calling API-URL with PARAMS using METHOD (default GET).  Return parsed objects."
   ;; Modified from https://stackoverflow.com/a/15119407/91877
+  (unless panda-base-url
+    (error "There's no URL for Bamboo configured.  Try customize-group -> panda"))
   (let ((url-request-extra-headers
          `(("Accept" . "application/json")
            ("Authorization" . ,(panda--auth-header))))
@@ -140,15 +147,15 @@ Extremely useful for debugging but way too verbose sometimes."
         (json-false :false))
     (when params
       (setq url-to-get (concat url-to-get "&" params)))
-    (panda--log "Fetch JSON URL:" url-to-get)
+    (panda--log "API call URL:" url-to-get)
     (with-current-buffer (url-retrieve-synchronously url-to-get panda-silence-url nil panda-api-timeout)
       (when panda-log-responses
-        (panda--log "JSON Response: " (buffer-string)))
+        (panda--log "API call response: " (buffer-string) "\n"))
       (goto-char url-http-end-of-headers)
-      (let ((data nil))
+      (let ((data 'error))
         (ignore-errors
           ;; if there's a problem parsing the JSON
-          ;; data ==> nil
+          ;; data ==> 'error
           (setq data (json-read)))
         (kill-buffer) ;; don't litter with API buffers
         data))))
@@ -207,10 +214,21 @@ Extremely useful for debugging but way too verbose sometimes."
 
 ;;------------------Cache for projects, plans, and branches-----------------------
 
-(defun panda-refresh-cache ()
-  "Refresh the cache of projects and plans."
+(defun panda-clear-credentials ()
+  "Clear current credentials, next API call will request them again."
   (interactive)
-  (panda--message "Refreshing Bamboo project and plan cache...")
+  (setq panda--auth-string nil)
+  (panda--message "Done. Next API call will request credentials."))
+
+(defun panda-refresh-cache ()
+  "Refresh the cache of projects, plans, and deploys."
+  (interactive)
+  (panda--refresh-cache-builds)
+  (panda--refresh-cache-deploys))
+
+(defun panda--refresh-cache-builds ()
+  "Refresh the cache of projects and plans."
+  (panda--message "Refreshing Bamboo build project and plan cache...")
   ;; If you have more than 10000 projects I doubt you are using this package
   (let* ((response (panda--api-call "/project" "expand=projects.project.plans&max-results=10000"))
          ;; convert vector to list
@@ -226,7 +244,39 @@ Extremely useful for debugging but way too verbose sometimes."
                                     (panda--json-nav '(plans plan) proj)))
       (push project panda--projects-cache)
       (push (cons (cdr project) plans) panda--plans-cache)))
-  (panda--message "Cache updated!"))
+  (panda--message "Build cache updated!"))
+
+(defun panda--refresh-cache-deploys ()
+  "Refresh the cache of deploys."
+  (panda--message "Refreshing Bamboo deployment cache...")
+  (let* ((data (panda--api-call "/deploy/project/all"))
+         (formatted (mapcar 'panda--format-deploy-entry data)))
+    (setq panda--deploys-cache (cl-remove-if-not
+                                ;; keep only the ones I can deploy to
+                                ;; and have a valid plan
+                                (lambda (deploy) (and (cddr deploy)
+                                                      (car deploy)))
+                                formatted)))
+  (panda--message "Deploy cache updated!"))
+
+(defun panda--format-deploy-entry (deploy-project)
+  "Convert a DEPLOY-PROJECT to the cache format."
+  (let ((did (alist-get 'id deploy-project))
+        ;; (plan-key (panda--json-nav '(planKey key) deploy-project))
+        (plan-key (alist-get 'name deploy-project))
+        (environments (panda--format-environments-entry
+                       (alist-get 'environments deploy-project))))
+    (unless plan-key
+      (message (prin1-to-string deploy-project)))
+    (cons plan-key (cons did environments))))
+
+(defun panda--format-environments-entry (deploy-envs)
+  "Convert DEPLOY-ENVS to the cache format, only for allowedToExecute environments."
+  (let ((as-list (append deploy-envs nil))
+        (valid-envs nil))
+    (dolist (environment as-list valid-envs)
+      (when (eq (panda--json-nav '(operations allowedToExecute) environment) t)
+        (push (panda--extract-alist '(name id) environment) valid-envs)))))
 
 (defun panda--projects ()
   "Get cached list of projects, fetch them if needed."
@@ -255,77 +305,66 @@ Extremely useful for debugging but way too verbose sometimes."
         (panda--message "Caching branches for plan...")))
     in-cache))
 
-(defun panda--deploys (plan-key)
-  "Get cached list of deployments for a PLAN-KEY, fetch and cache if needed."
-  (let ((in-cache (panda--agetstr plan-key panda--deploys-cache)))
-    (unless in-cache
-      (panda--message "Caching deploys for plan...")
-      ;; gross misuse of in-cache to temp hold the object
-      ;; retrieve from the API call
-      (setq in-cache (panda--get-plan-deploys plan-key))
-      (push in-cache panda--deploys-cache)
-      ;; format to return
-      (setq in-cache (cdr in-cache)))
-    in-cache))
+(defun panda--deploys ()
+  "Get cached list of deploy projects, fetch them if needed."
+  (unless panda--deploys-cache
+    (panda-refresh-cache))
+  panda--deploys-cache)
 
-(defun panda--get-plan-deploys (plan-key)
-  "Get the deploy data for a PLAN-KEY.
-This requires two API calls, one to get the project id and another for the
-actual deployments."
-  (let* ((raw (panda--api-call "/deploy/project/forPlan"
-                                 (concat "planKey=" plan-key)))
-         (did (alist-get 'id (elt raw 0)))
-         (proj-url (format "/deploy/project/%s" did))
-         (data (panda--api-call proj-url))
-         (envs (panda--format-deploy-data (alist-get 'environments data))))
-    (cons plan-key (cons did envs))))
-
-(defun panda--format-deploy-data (deploy-data)
-  "Format the information DEPLOY-DATA for caching."
-  (mapcar (lambda (elem) (panda--extract-alist '(name id) elem))
-          deploy-data))
 
 ;;------------------Common UI utilities-------------------------------------------
 
-(defun panda--select-project ()
+(defun panda--select-build-project ()
   "Run 'ido-completing-read' to select a project.  Return the project key."
   (let* ((projects (panda--projects))
          (selected (ido-completing-read "Select project: "
                                         (mapcar 'first projects))))
     (panda--agetstr selected projects)))
 
-(defun panda--select-plan (project-key)
+(defun panda--select-build-plan (project-key)
   "Run 'ido-completing-read' to select a plan under PROJECT-KEY.  Return the plan key."
   (let* ((plans (panda--plans project-key))
          (selected (ido-completing-read "Select plan: "
                                         (mapcar 'first plans))))
     (panda--agetstr selected plans)))
 
-(defun panda--select-branch (plan-key)
+(defun panda--select-build-branch (plan-key)
   "Run 'ido-completing-read' to select a plan under PLAN-KEY  Return the branch key."
   (let* ((branches (panda--branches plan-key))
          (selected (ido-completing-read "Select branch: "
                                         (mapcar 'first branches))))
     (panda--agetstr selected branches)))
 
-(defun panda--select-ppb (&optional project plan)
-  "Run the functions to select the project, plan and branch and return the keys in a list.  If provided PROJECT and PLAN won't be prompted."
+(defun panda--select-build-ppb (&optional project plan)
+  "Select the project, plan and branch for a build and return the keys.
+If provided PROJECT and PLAN won't be prompted."
   ;; if the plan is provided skip the project when not set
   (when (and (not project) plan)
     (setq project "--"))
-  (let* ((project-key (or project (panda--select-project)))
-         (plan-key (or plan (panda--select-plan project-key)))
-         (branch-key (panda--select-branch plan-key)))
+  (let* ((project-key (or project (panda--select-build-project)))
+         (plan-key (or plan (panda--select-build-plan project-key)))
+         (branch-key (panda--select-build-branch plan-key)))
     (list project-key plan-key branch-key)))
 
-(defun panda--select-pp (&optional project plan)
-  "Run the functions to select the PROJECT and PLAN and return the keys in a list.  If provided PROJECT won't be prompted."
-  ;; if the plan is provided skip the project when not set
-  (when (and (not project) plan)
-    (setq project "--"))
-  (let* ((project-key (or project (panda--select-project)))
-         (plan-key (or plan (panda--select-plan project-key))))
-    (list project-key plan-key)))
+(defun panda--select-deploy-project ()
+  "Run 'ido-completing-read' to select a deploy project.  Return the project data."
+  (let* ((deploy-names (mapcar 'car (panda--deploys)))
+         (selected (ido-completing-read "Select deploy project: " deploy-names)))
+    selected))
+
+(defun panda--unixms-to-string (unix-milliseconds)
+  "Convert UNIX-MILLISECONDS to date string.  I'm surprised this isn't a built in."
+  (let ((format-str "%Y-%m-%d %T")
+        (unix-epoch "1970-01-01T00:00:00+00:00")
+        (converted "")
+        (seconds nil)) ;; default to empty string
+    (ignore-errors
+      (setq seconds (/ unix-milliseconds 1000))
+      (setq converted
+            (format-time-string format-str
+                                (time-add (date-to-time unix-epoch)
+                                          seconds))))
+    converted))
 
 
 ;;------------------Build querying and information--------------------------------
@@ -340,31 +379,23 @@ actual deployments."
       (setq plan-key (panda--agetstr branch-name (panda--branches plan-key))))
     (panda--api-call (concat "/result/" plan-key "-" build-number))))
 
-;; TODO move to deploy-status
-(defun panda-get-build-date (build-name plan-key)
-  "Retrieve the build date of BUILD-NAME for PLAN-KEY."
-  (let ((build-date
-         (alist-get 'buildCompletedTime (panda-get-build-info build-name plan-key))))
-    ;; formatted to "month/day hour:minute"
-    ;; technically is not UTC because the original string says UTC-7 but whatever!
-    (format-time-string "%m/%d %H:%M"  (date-to-time build-date) "UTC")))
-
 (defun panda-queue-build (&optional plan)
   "Queue a build.  If PLAN is not provided, select it interactively."
   (interactive)
-  (destructuring-bind (_project-key plan-key branch-key) (panda--select-ppb nil plan)
+  (destructuring-bind (_project-key plan-key branch-key) (panda--select-build-ppb nil plan)
     (when (equal branch-key (concat plan-key "0"))
       ;; the base plan has a branch number of 0 but
       ;; won't build if using the prefix num
       (setq branch-key plan-key))
-    (panda--api-call (concat "/queue/" branch-key) nil "POST")))
+    (panda--api-call (concat "/queue/" branch-key) nil "POST")
+    (panda--message "Build queued")))
 
 (defun panda-build-results (&optional plan)
   "Fetch the build results for a branch under PLAN.
 If PLAN is not provided, select it interactively.
 The amount of builds to retrieve is controlled by 'panda-latest-max'."
   (interactive)
-  (destructuring-bind (_project-key _plan-key branch-key) (panda--select-ppb nil plan)
+  (destructuring-bind (_project-key _plan-key branch-key) (panda--select-build-ppb nil plan)
     (panda-build-results-branch branch-key)))
 
 (defun panda-build-results-branch (branch)
@@ -425,23 +456,25 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
   (tabulated-list-init-header))
 
 ;;------------------Creating deployments and pushing them-------------------------
-(defun panda-queue-deploy (&optional plan)
-  "Queue a deploy.  If PLAN is not provided, select it interactively."
+
+(defun panda-queue-deploy (&optional project)
+  "Queue a deploy.  If PROJECT is not provided, select it interactively."
   (interactive)
-  (destructuring-bind (_project-key plan-key) (panda--select-pp nil plan)
-    (let* ((metadata (panda--deploys plan-key))
-           (did (car metadata))
-           (environments (cdr metadata))
-           (deploy-data (panda--deploys-for-id did))
-           (selected-release (ido-completing-read "Select release: "
-                                                  (mapcar 'first deploy-data)))
-           (selected-environment (ido-completing-read "Select an environment: "
-                                                      (mapcar 'first environments))))
-      (panda--api-call "/queue/deployment"
-                         (format "environmentId=%s&versionId=%s"
-                                 (car (panda--agetstr selected-environment environments))
-                                 (car (panda--agetstr selected-release deploy-data)))
-                         "POST"))))
+  (let* ((project-name (or project (panda--select-deploy-project)))
+         (metadata (panda--agetstr project-name (panda--deploys)))
+         (did (car metadata))
+         (environments (cdr metadata))
+         (deploy-data (panda--deploys-for-id did))
+         (selected-release (ido-completing-read "Select release: "
+                                                (mapcar 'first deploy-data)))
+         (selected-environment (ido-completing-read "Select an environment: "
+                                                    (mapcar 'first environments))))
+    (panda--api-call "/queue/deployment"
+                     (format "environmentId=%s&versionId=%s"
+                             (car (panda--agetstr selected-environment environments))
+                             (car (panda--agetstr selected-release deploy-data)))
+                     "POST"))
+  (panda--message "Deployment requested"))
 
 (defun panda--deploys-for-id (did)
   "Get the deployments of a DID (deployment id)."
@@ -452,8 +485,57 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
     (mapcar
      (lambda (dep) (panda--extract-alist '(name id) dep))
      deploys)))
-;(build) or plan?
-;; panda-deploy-status
+
+(defun panda-deploy-status (&optional project)
+  "Display a project's deploy status.  If PROJECT is not provided, select it interactively."
+  (interactive)
+  (let* ((project-name (or project (panda--select-deploy-project)))
+         (metadata (panda--agetstr project-name (panda--deploys)))
+         (did (car metadata))
+         (data (elt (panda--api-call (format "/deploy/dashboard/%s" did)) 0))
+         (envs (alist-get 'environmentStatuses data))
+         (data-formatted (mapcar 'panda--format-deploy-status envs))
+         (buffer-name (concat "*Panda - Deploy status " project-name "*"))
+         (buffer (get-buffer-create buffer-name)))
+    (with-current-buffer buffer
+      ;; change to tablist mode
+      (panda--deploy-results-mode)
+      ;;buffer local variables
+      (setq panda--project-name project-name)
+      (setq tabulated-list-entries data-formatted)
+      (tabulated-list-print)
+      (local-set-key "g" (lambda ()
+                           (interactive)
+                           (panda-deploy-status panda--project-name)
+                           (panda--message (concat "Updated deploy status for " panda--project-name))))
+      (switch-to-buffer buffer)
+      (panda--message (concat "Listing deploy status for " project-name)))))
+
+(defun panda--format-deploy-status (deploy-status)
+  "Format DEPLOY-STATUS for tabulated output."
+  (let* ((env-name (panda--json-nav '(environment name) deploy-status))
+         (result (alist-get 'deploymentResult deploy-status))
+         (deploy-name (panda--json-nav '(deploymentVersion name) result))
+         (state (alist-get 'lifeCycleState result))
+         (status (alist-get 'deploymentState result))
+         (started (panda--unixms-to-string (alist-get 'startedDate result)))
+         (completed (panda--unixms-to-string (alist-get 'finishedDate result))))
+    ;; tabulated list requires a list with an ID and a vector
+    (list env-name (vector env-name state status started completed deploy-name))))
+
+(define-derived-mode panda--deploy-results-mode tabulated-list-mode "Panda deploy results view" "Major mode to display Bamboo's deploy results."
+  (setq tabulated-list-format [("Environment" 35 nil)
+                               ("State" 10 nil)
+                               ("Status" 10)
+                               ("Started" 20 nil)
+                               ("Completed" 20 nil)
+                               ("Version name" 0 nil)])
+  (set (make-local-variable 'panda--project-name) nil)
+  (setq tabulated-list-padding 1)
+  (tabulated-list-init-header))
+
+;; panda-deploy-from-build
+;; panda-create-deploy
 
 (provide 'panda)
 ;;; panda.el ends here
