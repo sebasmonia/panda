@@ -5,7 +5,7 @@
 ;; Author: Sebastian Monia <smonia@outlook.com>
 ;; URL: https://github.com/sebasmonia/panda
 ;; Package-Requires: ((emacs "25"))
-;; Version: 0.9
+;; Version: 1.0
 ;; Keywords: maint tool
 
 ;; This file is not part of GNU Emacs.
