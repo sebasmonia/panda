@@ -39,6 +39,8 @@ Interactive:
                     environment and deploy.
 * panda-deploy-status: gets the status of all environments for a deploy
                      project.
+* panda-create-release: create a release out of a successful build.
+
 * panda-clear-credentials: force inputting user/pass in the next API call.
 
 * panda-refresh-cache: re-fetch list of build plans and deploy projects.
@@ -46,10 +48,12 @@ Interactive:
 Non interactive:
 
 * panda-build-results-branch: if you know you branch key you can call this
-                            function from elisp to display the build status
+                              function from elisp to display the build status
 
 ## Roadmap
 
-* Create deploys from builds
+* Move hardcoded constants to defvars, even if kept private, to allow monkey patching if they change
+  (example: "Successful")
 * Find a way to tell if a build has a deploy created
-* Improve documentation
+* Improve suggested deploy name (in the UI it suggests the branch name (not key) with # suffix)
+* Find the name of the base plan's branch from the data instead of hardcoding the name to "Base"

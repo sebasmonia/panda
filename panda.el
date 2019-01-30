@@ -107,10 +107,15 @@ Extremely useful for debugging but way too verbose for every day use."
 (defvar panda--project-name nil "Buffer local variable for panda--deploy-results-mode.")
 
 (define-prefix-command 'panda-map)
+;; Queue commands
 (define-key panda-map (kbd "q b") 'panda-queue-build)
 (define-key panda-map (kbd "q d") 'panda-queue-deploy)
+;; Status commands
 (define-key panda-map (kbd "s b") 'panda-build-results)
 (define-key panda-map (kbd "s d") 'panda-deploy-status)
+;; Create
+(define-key panda-map (kbd "c") 'panda-create-release)
+;; Refresh
 (define-key panda-map (kbd "r") 'panda-refresh-cache)
 ; Interactive commands not mapped:
 ;; panda-clear-credentials
@@ -134,20 +139,25 @@ Extremely useful for debugging but way too verbose for every day use."
 
 ;;------------------HTTP Stuff----------------------------------------------------
 
-(defun panda--api-call (api-url &optional params method)
-  "Retrieve JSON result of calling API-URL with PARAMS using METHOD (default GET).  Return parsed objects."
+;; maybe change parameters order? url, method, qs params, data?
+(defun panda--api-call (api-url &optional params method data)
+  "Retrieve JSON result of calling API-URL with PARAMS and DATA using METHOD (default GET).  Return parsed objects."
   ;; Modified from https://stackoverflow.com/a/15119407/91877
   (unless panda-base-url
     (error "There's no URL for Bamboo configured.  Try customize-group -> panda"))
+  (unless data
+    (setq data ""))
   (let ((url-request-extra-headers
          `(("Accept" . "application/json")
+           ("Content-Type" . "application/json")
            ("Authorization" . ,(panda--auth-header))))
         (url-to-get (concat panda-base-url api-url "?os_authType=basic"))
         (url-request-method (or method "GET"))
+        (url-request-data (encode-coding-string data 'utf-8))
         (json-false :false))
     (when params
       (setq url-to-get (concat url-to-get "&" params)))
-    (panda--log "API call URL:" url-to-get)
+    (panda--log "API call URL:" url-request-method "to"  url-to-get "with data" url-request-data ".")
     (with-current-buffer (url-retrieve-synchronously url-to-get panda-silence-url nil panda-api-timeout)
       (when panda-log-responses
         (panda--log "API call response: " (buffer-string) "\n"))
@@ -456,6 +466,30 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
   (tabulated-list-init-header))
 
 ;;------------------Creating deployments and pushing them-------------------------
+
+(defun panda-create-release ()
+  "Create a new release from a succesful build."
+  (interactive)
+  (destructuring-bind (_project-key plan-key branch-key) (panda--select-build-ppb nil nil)
+    ;; I could re-work the cache to skip this call if I stored the plan key. But some
+    ;; deploys dont have them, so I have to code for that too...let's have one extra
+    ;; call and be done with it
+    (let* ((forplan-response (panda--api-call "/deploy/project/forPlan"
+                                              (concat "planKey=" plan-key)))
+           (did (alist-get 'id (elt forplan-response 0)))
+           (last-builds (mapcar 'cadr (panda--build-results-data branch-key)))
+           (successful (cl-remove-if-not (lambda (build) (equal (elt build 1) "Successful")) last-builds))
+           (formatted (mapcar (lambda (build) (concat (elt build 0) " - Completed: " (elt build 2))) successful))
+           (selected-build (ido-completing-read "Select a build: " formatted))
+           (release-name nil)
+           (payload nil))
+      (setq selected-build (car (split-string selected-build))) ;; really shady
+      (setq release-name (read-string "Release name: " selected-build))
+      (setq payload (json-encode (list (cons 'planResultKey selected-build) (cons 'name  release-name))))
+      (panda--api-call (format "/deploy/project/%s/version" did)
+                       nil
+                       "POST"
+                       payload))))
 
 (defun panda-queue-deploy (&optional project)
   "Queue a deploy.  If PROJECT is not provided, select it interactively."
