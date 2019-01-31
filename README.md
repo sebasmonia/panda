@@ -52,8 +52,8 @@ Non interactive:
 
 ## Roadmap
 
-* Move hardcoded constants to defvars, even if kept private, to allow monkey patching if they change
-  (example: "Successful")
 * Find a way to tell if a build has a deploy created
-* Improve suggested deploy name (in the UI it suggests the branch name (not key) with # suffix)
-* Find the name of the base plan's branch from the data instead of hardcoding the name to "Base"
+* Create releases from the build status buffer
+* Push releases from the deploy project status buffer
+* Add a "release status" that shows where a release is and allows to push it
+* Find the name of the base plan's branch from the data instead of hardcoding the name to "Base" _Seems impossible :(_

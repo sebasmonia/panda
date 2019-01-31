@@ -67,7 +67,7 @@
   :group 'extensions)
 
 (defcustom panda-base-url ""
-  "Base URL of the Bamboo API."
+  "Base URL of the Bamboo API, for example https://bamboo.my-company.com/rest/api/latest, no trailing slash!!!."
   :type 'string)
 
 (defcustom panda-username ""
@@ -102,6 +102,9 @@ Extremely useful for debugging but way too verbose for every day use."
 (defvar panda--plans-cache nil "Caches the plans for each build project the user has access to, in one go.")
 (defvar panda--branches-cache nil "Caches the branches for each plan, as they are requested.")
 (defvar panda--deploys-cache nil "Caches the deployment projects (not build projects) in one single call to /deploy/project/all.")
+
+(defvar panda--base-plan "[Master plan]")
+(defvar panda--build-status-for-release "Successful")
 
 (defvar panda--branch-key nil "Buffer local variable for panda--build-status-mode.")
 (defvar panda--project-name nil "Buffer local variable for panda--deploy-results-mode.")
@@ -308,8 +311,7 @@ Extremely useful for debugging but way too verbose for every day use."
       (let* ((data (panda--api-call (concat "/plan/" plan-key "/branch")))
              (branches-data (panda--json-nav '(branches branch) data))
              (branches (panda--get-pairs 'shortName 'key branches-data)))
-        (panda--log (prin1-to-string branches))
-        (push (cons "[Base branch]" plan-key) branches) ;; adding master plan
+        (push (cons panda--base-plan plan-key) branches) ;; adding master plan
         (push (cons plan-key branches) panda--branches-cache)
         (setq in-cache branches)
         (panda--message "Caching branches for plan...")))
@@ -477,19 +479,28 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
     (let* ((forplan-response (panda--api-call "/deploy/project/forPlan"
                                               (concat "planKey=" plan-key)))
            (did (alist-get 'id (elt forplan-response 0)))
-           (last-builds (mapcar 'cadr (panda--build-results-data branch-key)))
-           (successful (cl-remove-if-not (lambda (build) (equal (elt build 1) "Successful")) last-builds))
-           (formatted (mapcar (lambda (build) (concat (elt build 0) " - Completed: " (elt build 2))) successful))
+           (formatted (panda--successful-builds-for-release branch-key))
            (selected-build (ido-completing-read "Select a build: " formatted))
            (release-name nil)
            (payload nil))
       (setq selected-build (car (split-string selected-build))) ;; really shady
-      (setq release-name (read-string "Release name: " selected-build))
+      (setq release-name (read-string "Release name: " (panda--proposed-release-name did selected-build)))
       (setq payload (json-encode (list (cons 'planResultKey selected-build) (cons 'name  release-name))))
       (panda--api-call (format "/deploy/project/%s/version" did)
                        nil
                        "POST"
                        payload))))
+
+(defun panda--successful-builds-for-release (branch-key)
+  "Return the last few successful builds for BRANCH-KEY."
+  (let* ((last-builds (mapcar 'cadr (panda--build-results-data branch-key)))
+         (successful (cl-remove-if-not (lambda (build) (equal (elt build 1) panda--build-status-for-release)) last-builds)))
+    (mapcar (lambda (build) (concat (elt build 0) " - Completed: " (elt build 2))) successful)))
+
+(defun panda--proposed-release-name (did build-key)
+  "Use DID (deploy project id) and BUILD-KEY to generate the release name."
+  (alist-get 'nextVersionName (panda--api-call (format "/deploy/projectVersioning/%s/nextVersion" did)
+                                               (concat "resultKey=" build-key))))
 
 (defun panda-queue-deploy (&optional project)
   "Queue a deploy.  If PROJECT is not provided, select it interactively."
@@ -559,8 +570,8 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
 
 (define-derived-mode panda--deploy-results-mode tabulated-list-mode "Panda deploy results view" "Major mode to display Bamboo's deploy results."
   (setq tabulated-list-format [("Environment" 35 nil)
-                               ("State" 10 nil)
-                               ("Status" 10)
+                               ("State" 12 nil)
+                               ("Status" 8)
                                ("Started" 20 nil)
                                ("Completed" 20 nil)
                                ("Version name" 0 nil)])
@@ -569,7 +580,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
   (tabulated-list-init-header))
 
 ;; panda-deploy-from-build
-;; panda-create-deploy
+;; find if a build has a deploy: https://bamboo.starz.com/rest/api/latest/search/versions?searchTerm=build-name&deploymentProjectId=did
 
 (provide 'panda)
 ;;; panda.el ends here
