@@ -359,21 +359,21 @@ Artifacts:
 (defun panda--select-build-project ()
   "Run 'ido-completing-read' to select a project.  Return the project key."
   (let* ((projects (panda--projects))
-         (selected (ido-completing-read "Select project: "
+         (selected (completing-read "Select project: "
                                         (mapcar 'first projects))))
     (panda--agetstr selected projects)))
 
 (defun panda--select-build-plan (project-key)
   "Run 'ido-completing-read' to select a plan under PROJECT-KEY.  Return the plan key."
   (let* ((plans (panda--plans project-key))
-         (selected (ido-completing-read "Select plan: "
+         (selected (completing-read "Select plan: "
                                         (mapcar 'first plans))))
     (panda--agetstr selected plans)))
 
 (defun panda--select-build-branch (plan-key)
   "Run 'ido-completing-read' to select a plan under PLAN-KEY  Return the branch key."
   (let* ((branches (panda--branches plan-key))
-         (selected (ido-completing-read "Select branch: "
+         (selected (completing-read "Select branch: "
                                         (mapcar 'first branches))))
     (panda--agetstr selected branches)))
 
@@ -391,7 +391,7 @@ If provided PROJECT and PLAN won't be prompted."
 (defun panda--select-deploy-project ()
   "Run 'ido-completing-read' to select a deploy project.  Return the project data."
   (let* ((deploy-names (mapcar 'car (panda--deploys)))
-         (selected (ido-completing-read "Select deploy project: " deploy-names)))
+         (selected (completing-read "Select deploy project: " deploy-names)))
     selected))
 
 (defun panda--unixms-to-string (unix-milliseconds)
@@ -568,7 +568,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                                               (concat "planKey=" plan-key)))
            (did (alist-get 'id (elt forplan-response 0)))
            (formatted (panda--successful-builds-for-release branch-key))
-           (selected-build (ido-completing-read "Select a build: " formatted))
+           (selected-build (completing-read "Select a build: " formatted))
            (release-name nil)
            (payload nil))
       (setq selected-build (car (split-string selected-build))) ;; really shady
@@ -598,9 +598,9 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
          (did (car metadata))
          (environments (cdr metadata))
          (deploy-data (panda--deploys-for-id did))
-         (selected-release (ido-completing-read "Select release: "
+         (selected-release (completing-read "Select release: "
                                                 (mapcar 'first deploy-data)))
-         (selected-environment (ido-completing-read "Select an environment: "
+         (selected-environment (completing-read "Select an environment: "
                                                     (mapcar 'first environments))))
     (panda--api-call "/queue/deployment"
                      (format "environmentId=%s&versionId=%s"
