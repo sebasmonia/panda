@@ -5,7 +5,7 @@
 ;; Author: Sebastian Monia <smonia@outlook.com>
 ;; URL: https://github.com/sebasmonia/panda
 ;; Package-Requires: ((emacs "25"))
-;; Version: 1.0
+;; Version: 1.1
 ;; Keywords: maint tool
 
 ;; This file is not part of GNU Emacs.
@@ -15,13 +15,11 @@
 ;;; Commentary:
 
 ;; Consume Bamboo's terrible REST API to do useful things
-;; NOTE: This package hasn't hit version 1 yet, breaking
-;;       changes are expected.
 ;;
 ;; Steps to setup:
 ;;   1. Place tfsmacs.el in your load-path.  Or install from MELPA (coming soon)
 ;;   2. Customize 'panda' to add the Bamboo URL or manually:
-;;      (setq 'panda-base-url "https://bamboo.yourorg.com/rest/api/latest"))
+;;      (setq 'panda-api-url "https://bamboo.yourorg.com/rest/api/latest"))
 ;;      - No trailing / -
 ;;   3. Optionally, customize or manually set panda-username if you don't want
 ;;      to enter your user name on each session
@@ -61,13 +59,18 @@
 (require 'json)
 (require 'cl-lib)
 (require 'url)
+(require 'browse-url)
 
 (defgroup panda nil
   "Client for Bamboo's REST API."
   :group 'extensions)
 
-(defcustom panda-base-url ""
+(defcustom panda-api-url ""
   "Base URL of the Bamboo API, for example https://bamboo.my-company.com/rest/api/latest, no trailing slash!!!."
+  :type 'string)
+
+(defcustom panda-browser-url ""
+  "URL to the Bamboo website, to launch a browser to view items.  For example https://bamboo.my-company.com, no trailing slash!!!."
   :type 'string)
 
 (defcustom panda-username ""
@@ -109,6 +112,33 @@ Extremely useful for debugging but way too verbose for every day use."
 (defvar panda--branch-key nil "Buffer local variable for panda--build-status-mode.")
 (defvar panda--project-name nil "Buffer local variable for panda--deploy-results-mode.")
 
+(defvar panda--browse-build "/browse/%s" "What to add to 'panda-browser-url to open builds in the browser.")
+(defvar panda--browse-deploy-project "/deploy/viewDeploymentProjectEnvironments.action?id=%s" "What to add to 'panda-browser-url to open deploy projects in the browser.")
+
+(defvar panda--build-buffer-template "
+Build key: %s
+
+Project: %s
+Master plan: %s
+Plan name: %s
+
+State: %s
+Started: %s
+Finished: %s
+Duration: %s
+
+Reason: %s
+Build test summary: %s
+
+Jira Issues:
+%s
+
+Changes:
+%s
+
+Artifacts:
+%s" "Template to call 'format' for the build details buffer.")
+
 (define-prefix-command 'panda-map)
 ;; Queue commands
 (define-key panda-map (kbd "q b") 'panda-queue-build)
@@ -146,21 +176,21 @@ Extremely useful for debugging but way too verbose for every day use."
 (defun panda--api-call (api-url &optional params method data)
   "Retrieve JSON result of calling API-URL with PARAMS and DATA using METHOD (default GET).  Return parsed objects."
   ;; Modified from https://stackoverflow.com/a/15119407/91877
-  (unless panda-base-url
-    (error "There's no URL for Bamboo configured.  Try customize-group -> panda"))
+  (unless panda-api-url
+    (error "There's no API URL for Bamboo configured.  Try customize-group -> panda"))
   (unless data
     (setq data ""))
   (let ((url-request-extra-headers
          `(("Accept" . "application/json")
            ("Content-Type" . "application/json")
            ("Authorization" . ,(panda--auth-header))))
-        (url-to-get (concat panda-base-url api-url "?os_authType=basic"))
+        (url-to-get (concat panda-api-url api-url "?os_authType=basic"))
         (url-request-method (or method "GET"))
         (url-request-data (encode-coding-string data 'utf-8))
         (json-false :false))
     (when params
       (setq url-to-get (concat url-to-get "&" params)))
-    (panda--log "API call URL:" url-request-method "to"  url-to-get "with data" url-request-data ".")
+    (panda--log "----- API call: " url-request-method "to "  url-to-get "with data" url-request-data " -----")
     (with-current-buffer (url-retrieve-synchronously url-to-get panda-silence-url nil panda-api-timeout)
       (when panda-log-responses
         (panda--log "API call response: " (buffer-string) "\n"))
@@ -378,8 +408,60 @@ If provided PROJECT and PLAN won't be prompted."
                                           seconds))))
     converted))
 
+(defun panda--browse (path)
+  "Open the default browser using PATH."
+  (unless panda-browser-url
+    (error "There's no broser URL for Bamboo configured.  Try customize-group -> panda"))
+  (browse-url (concat panda-browser-url path)))
 
 ;;------------------Build querying and information--------------------------------
+
+(defun panda-display-build-info (build-key)
+  "Show a buffer with the details of BUILD-KEY.  Invoked from build status list."
+  (let* ((data (panda--api-call (concat "/result/" build-key)
+                                "expand=changes,metadata,artifacts,comments,jiraIssues,variable,stages"))
+         (project-name (alist-get 'projectName data))
+         (master-plan (or (panda--json-nav '(master shortName) data) ""))
+         ;; all these keys can be gotten in one go as they in the base level and displayed together
+         (middle-section (panda--extract-alist '(planName state
+                                                          prettyBuildStartedTime prettyBuildCompletedTime
+                                                          buildDurationDescription buildReason buildTestSummary)
+                                               data))
+         (jira-formatted (panda--build-info-format-jira-issues (panda--json-nav '(jiraIssues issue) data)))
+         (changes-formatted (panda--build-info-format-changes (panda--json-nav '(changes change) data)))
+         (artifacts-formatted "--") ;; don't have any to test so...
+         (data-to-display (append (list build-key project-name master-plan)
+                                  middle-section
+                                  (list jira-formatted changes-formatted artifacts-formatted)))
+         (buffer-name (concat "*Panda - Build details " build-key))
+         (buffer (get-buffer-create buffer-name)))
+    (with-current-buffer buffer
+      (setq buffer-read-only nil)
+      (kill-region (point-min) (point-max)) ;; in case of an update
+      (insert (apply 'format panda--build-buffer-template data-to-display))
+      (setq buffer-read-only t)
+      (switch-to-buffer-other-window buffer)
+      (panda--message (concat "Showing details for build" build-key)))))
+
+(defun panda--build-info-format-jira-issues (issues)
+  "Create a printable string out of ISSUES."
+  (let ((to-concat (mapcar (lambda(x) (apply 'format "%s\t%s\t%s\t%s\t\"%s\""
+                                             (panda--extract-alist '(key issueType status assignee summary) x)))
+                           issues))
+        (printable ""))
+    (when to-concat
+      (setq printable (mapconcat 'identity to-concat "\n")))
+    printable)) ;; defaults to "" if no issues
+
+(defun panda--build-info-format-changes (changes-list)
+  "Create a printable string out of CHANGES-LIST."
+  (let ((to-concat (mapcar (lambda(x) (apply 'format "%s\t%s"
+                                             (panda--extract-alist '(changesetId fullName) x)))
+                           changes-list))
+        (printable ""))
+    (when to-concat
+      (setq printable (mapconcat 'identity to-concat "\n")))
+    printable)) ;; defaults to "" if no issues
 
 ;; TODO Make interactive version and write to buffer
 (defun panda-get-build-info (build-name plan-key)
@@ -430,8 +512,14 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                            (setq tabulated-list-entries (panda--build-results-data panda--branch-key))
                            (tabulated-list-print)
                            (panda--message (concat "Updated list of builds for " panda--branch-key))))
+      (local-set-key "d" (lambda ()
+                           (interactive)
+                           (panda-display-build-info (tabulated-list-get-id))))
+      (local-set-key "b" (lambda ()
+                           (interactive)
+                           (panda--browse (format panda--browse-build (tabulated-list-get-id)))))
       (switch-to-buffer buffer)
-      (panda--message (concat "Listing builds for " branch)))))
+      (panda--message (concat "Listing builds for " branch ". Press d for build details, b to open the build in the browser, g to refresh.")))))
 
 (defun panda--build-results-data (branch-key)
   "Get BRANCH-KEY build data for 'tabulated-list-entries'."
@@ -547,14 +635,18 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
       (panda--deploy-results-mode)
       ;;buffer local variables
       (setq panda--project-name project-name)
+      (setq panda--deploy-project-id did)
       (setq tabulated-list-entries data-formatted)
       (tabulated-list-print)
       (local-set-key "g" (lambda ()
                            (interactive)
                            (panda-deploy-status panda--project-name)
                            (panda--message (concat "Updated deploy status for " panda--project-name))))
+      (local-set-key "b" (lambda ()
+                           (interactive)
+                           (panda--browse (format panda--browse-deploy-project panda--deploy-project-id))))
       (switch-to-buffer buffer)
-      (panda--message (concat "Listing deploy status for " project-name)))))
+      (panda--message (concat "Listing deploy status for " project-name ". Press b to open the deploy project in a browser, g to refresh.")))))
 
 (defun panda--format-deploy-status (deploy-status)
   "Format DEPLOY-STATUS for tabulated output."
@@ -563,7 +655,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
          (deploy-name (panda--json-nav '(deploymentVersion name) result))
          (state (alist-get 'lifeCycleState result))
          (status (alist-get 'deploymentState result))
-         (started (panda--unixms-to-string (alist-get 'startedDate result)))
+         (started (panda--unixms-to-string (alist-get 'startedDate result)))b
          (completed (panda--unixms-to-string (alist-get 'finishedDate result))))
     ;; tabulated list requires a list with an ID and a vector
     (list env-name (vector env-name state status started completed deploy-name))))
@@ -576,6 +668,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                                ("Completed" 20 nil)
                                ("Version name" 0 nil)])
   (set (make-local-variable 'panda--project-name) nil)
+  (set (make-local-variable 'panda--deploy-project-id) nil)
   (setq tabulated-list-padding 1)
   (tabulated-list-init-header))
 

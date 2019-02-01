@@ -1,3 +1,5 @@
+[![MELPA](https://melpa.org/packages/panda-badge.svg)](https://melpa.org/#/panda)
+
 # panda
 Emacs package that consumes Bamboo's REST API to do useful things.
 
@@ -9,7 +11,7 @@ Emacs package that consumes Bamboo's REST API to do useful things.
 2. Customize 'panda' to add the Bamboo URL or manually _(Notice there's no
 trailing /)_:
 ```elisp
-    (setq 'panda-base-url "https://bamboo.yourorg.com/rest/api/latest"))          
+    (setq 'panda-api-url "https://bamboo.yourorg.com/rest/api/latest"))          
 ```
 
 3. Optionally, customize or manually set panda-username if you don't want to enter
