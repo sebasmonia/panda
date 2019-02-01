@@ -17,7 +17,7 @@
 ;; Consume Bamboo's terrible REST API to do useful things
 ;;
 ;; Steps to setup:
-;;   1. Place tfsmacs.el in your load-path.  Or install from MELPA (coming soon)
+;;   1. Place panda.el in your load-path.  Or install from MELPA.
 ;;   2. Customize 'panda' to add the Bamboo URL or manually:
 ;;      (setq 'panda-api-url "https://bamboo.yourorg.com/rest/api/latest"))
 ;;      - No trailing / -

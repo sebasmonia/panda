@@ -6,7 +6,7 @@ Emacs package that consumes Bamboo's REST API to do useful things.
 
 ## Installation
 
-1. Place tfsmacs.el in your load-path.  Or install from MELPA (coming soon)
+1. Place panda.el in your load-path.  Or install from MELPA.
  
 2. Customize 'panda' to add the Bamboo URL or manually _(Notice there's no
 trailing /)_:
