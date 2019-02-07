@@ -54,8 +54,7 @@ Non interactive:
 
 ## Roadmap
 
-* Find a way to tell if a build has a deploy created
-* Create releases from the build status buffer
+* Find a way to tell if a build has a deploy created _seems impossible_
 * Push releases from the deploy project status buffer
 * Add a "release status" that shows where a release is and allows to push it
-* Find the name of the base plan's branch from the data instead of hardcoding the name to "Base" _Seems impossible :(_
+* Find the name of the base plan's branch from the data instead of hardcoding the name to "Base" _seems impossible_
