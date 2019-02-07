@@ -677,7 +677,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
     (when (eq panda-open-status-after-deploy 'ask)
       (setq show-status (y-or-n-p "Show deployment status for the project? ")))
     (when show-status
-      (panda-deploy-status panda--project-name))))
+      (panda-deploy-status project-name))))
 
 (defun panda--deploys-for-id (did)
   "Get the deployments of a DID (deployment id)."
