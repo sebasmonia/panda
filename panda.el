@@ -100,6 +100,25 @@ Extremely useful for debugging but way too verbose for every day use."
    "Timeout for Bamboo API calls, in seconds."
    :type 'integer)
 
+(defcustom panda-deploy-confirmation-regex ""
+   "If an environment name matches the regex, Panda will request confirmation before submitting the deploy."
+   :type 'string)
+
+(defcustom panda-open-status-after-build 'ask
+  "Open the build status for the corresponding branch after requesting a build.
+If yes, automatically open it.  No to never ask.  Set to 'ask (default) to be prompted each time."
+  :type '(choice (const :tag "No" nil)
+                 (const :tag "Yes" t)
+                 (const :tag "Ask" ask)))
+
+(defcustom panda-open-status-after-deploy 'ask
+  "Open the status for the corresponding project after requesting a deploy.
+If yes, automatically open it.  No to never ask.  Set to 'ask (default) to be prompted each time."
+  :type '(choice (const :tag "No" nil)
+                 (const :tag "Yes" t)
+                 (const :tag "Ask" ask)))
+
+
 (defvar panda--auth-string nil "Caches the credentials for API calls.")
 (defvar panda--projects-cache nil "Caches all the build projects the user has access to, in one go.")
 (defvar panda--plans-cache nil "Caches the plans for each build project the user has access to, in one go.")
@@ -481,8 +500,13 @@ If provided PROJECT and PLAN won't be prompted."
       ;; the base plan has a branch number of 0 but
       ;; won't build if using the prefix num
       (setq branch-key plan-key))
-    (panda--api-call (concat "/queue/" branch-key) nil "POST")
-    (panda--message "Build queued")))
+    (let ((show-status panda-open-status-after-build)) ;; later we'll check for 'ask or t
+      (panda--api-call (concat "/queue/" branch-key) nil "POST")
+      (when (eq panda-open-status-after-build 'ask)
+        (setq show-status (y-or-n-p "Show build status for the branch? ")))
+      (if show-status
+          (panda-build-results-branch branch-key)
+        (panda--message "Build queued")))))
 
 (defun panda-build-results (&optional plan)
   "Fetch the build results for a branch under PLAN.
@@ -518,8 +542,11 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
       (local-set-key "b" (lambda ()
                            (interactive)
                            (panda--browse (format panda--browse-build (tabulated-list-get-id)))))
+      (local-set-key "c" (lambda ()
+                           (interactive)
+                           (panda--create-release-from-build-status (tabulated-list-get-entry))))
       (switch-to-buffer buffer)
-      (panda--message (concat "Listing builds for " branch ". Press d for build details, b to open the build in the browser, g to refresh.")))))
+      (panda--message (concat "Listing builds for " branch ". Press d for build details, b to open the build in the browser, c to create a release, g to refresh.")))))
 
 (defun panda--build-results-data (branch-key)
   "Get BRANCH-KEY build data for 'tabulated-list-entries'."
@@ -539,9 +566,12 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
 (defun panda--fetch-build-bykey (build-key)
   "Return the data for BUILD-KEY formatted for tabulated mode."
   (let* ((build-data (panda--api-call (concat "/result/" build-key)))
+         (plan-key (or (panda--json-nav '(master key) build-data) ;; for branches this will be non-empty
+                       (panda--json-nav '(plan key) build-data))) ;; if we get here this is a base plan
          (filtered-data (panda--extract-alist '(key state prettyBuildStartedTime prettyBuildCompletedTime
                                                     buildDurationDescription)
                                               build-data)))
+    (setq filtered-data (append filtered-data (list plan-key)))
     ;; tabulated list requires a list with an ID and a vector
     (list (car filtered-data) (vconcat filtered-data))))
 
@@ -564,20 +594,42 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
     ;; I could re-work the cache to skip this call if I stored the plan key. But some
     ;; deploys dont have them, so I have to code for that too...let's have one extra
     ;; call and be done with it
-    (let* ((forplan-response (panda--api-call "/deploy/project/forPlan"
-                                              (concat "planKey=" plan-key)))
-           (did (alist-get 'id (elt forplan-response 0)))
+    (let* ((did (panda--get-deployid-for-plan-key plan-key))
            (formatted (panda--successful-builds-for-release branch-key))
            (selected-build (completing-read "Select a build: " formatted))
-           (release-name nil)
-           (payload nil))
+           (release-name nil))
       (setq selected-build (car (split-string selected-build))) ;; really shady
       (setq release-name (read-string "Release name: " (panda--proposed-release-name did selected-build)))
-      (setq payload (json-encode (list (cons 'planResultKey selected-build) (cons 'name  release-name))))
-      (panda--api-call (format "/deploy/project/%s/version" did)
-                       nil
-                       "POST"
-                       payload))))
+      (panda--create-release-execute selected-build did release-name))))
+
+(defun panda--get-deployid-for-plan-key (plan-key)
+  "Obtain the deployment id for PLAN-KEY."
+  (let ((forplan-response (panda--api-call "/deploy/project/forPlan"
+                                           (concat "planKey=" plan-key))))
+    (alist-get 'id (elt forplan-response 0))))
+
+(defun panda--create-release-execute (build-key did release-name)
+  "Make an API call to create a release in DID with RELEASE-NAME out of BUILD-KEY."
+  (let ((payload (json-encode (list (cons 'planResultKey build-key) (cons 'name  release-name)))))
+    (panda--api-call (format "/deploy/project/%s/version" did)
+                     nil
+                     "POST"
+                     payload)))
+
+(defun panda--create-release-from-build-status (selected-entry)
+  "Create a new release out of SELECTED-ENTRY from the build status screen."
+  (interactive)
+  (let ((build-key (elt selected-entry 0))
+        (plan-key (elt selected-entry 5))
+        (build-status (elt selected-entry 1))
+        (did nil)
+        (release-name nil))
+    (if (string-equal panda--build-status-for-release build-status)
+        (progn
+          (setq did (panda--get-deployid-for-plan-key plan-key))
+          (setq release-name (read-string "Release name: " (panda--proposed-release-name did build-key)))
+          (panda--create-release-execute build-key did release-name))
+      (panda--message "Can't create a release from a non-successful build."))))
 
 (defun panda--successful-builds-for-release (branch-key)
   "Return the last few successful builds for BRANCH-KEY."
@@ -601,13 +653,31 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
          (selected-release (completing-read "Select release: "
                                                 (mapcar 'first deploy-data)))
          (selected-environment (completing-read "Select an environment: "
-                                                    (mapcar 'first environments))))
-    (panda--api-call "/queue/deployment"
-                     (format "environmentId=%s&versionId=%s"
-                             (car (panda--agetstr selected-environment environments))
-                             (car (panda--agetstr selected-release deploy-data)))
-                     "POST"))
-  (panda--message "Deployment requested"))
+                                                (mapcar 'first environments)))
+         (confirmed t)) ;; we'll check if there's a regex match later
+    (when (not (string-empty-p panda-deploy-confirmation-regex))
+      (if (string-match-p panda-deploy-confirmation-regex selected-environment)
+          (setq confirmed (y-or-n-p (format "OK to deploy version %s to environment %s? " selected-release selected-environment)))
+        (setq confirmed t))) ;; if it doesn't match the regex we don't need to ask
+
+    (if confirmed
+        (progn
+          (panda--api-call "/queue/deployment"
+                           (format "environmentId=%s&versionId=%s"
+                                   (car (panda--agetstr selected-environment environments))
+                                   (car (panda--agetstr selected-release deploy-data)))
+                           "POST")
+          (panda--message "Deployment requested")
+          (panda--show-deploy-status project-name)) ;; this is busy enough at is it, extracted showing status
+      (message "Deployment cancelled"))))
+
+(defun panda--show-deploy-status (project-name)
+  "Show PROJECT-NAME deploy status, according to the user preferences."
+  (let ((show-status panda-open-status-after-deploy)) ;; later we'll check for 'ask or t
+    (when (eq panda-open-status-after-deploy 'ask)
+      (setq show-status (y-or-n-p "Show deployment status for the project? ")))
+    (when show-status
+      (panda-deploy-status panda--project-name))))
 
 (defun panda--deploys-for-id (did)
   "Get the deployments of a DID (deployment id)."
