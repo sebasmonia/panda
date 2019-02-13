@@ -24,7 +24,7 @@ The next step would be to use customize for panda. Options are documented, below
 
 1. **REQUIRED**: Add the Bamboo API URL _(Notice there's no trailing /)_:
 ```elisp
-    (setq 'panda-api-url "https://bamboo.yourorg.com/rest/api/latest"))
+    (setq 'panda-api-url "https://bamboo.yourorg.com/rest/api/latest")
 ```
 
     There's also `panda-browser-url`, which is used to open elements in your default browser.
@@ -38,7 +38,7 @@ The next step would be to use customize for panda. Options are documented, below
 4. `panda-less-messages` means the package won't display as many messages in the echo area.
    You can still read them all in the package's log buffer
 
-5. The pair `panda-open-status-after-build` and `open-status-after-deploy default` to 'ask.
+5. The pair `panda-open-status-after-build` and `panda-open-status-after-deploy` default to 'ask.
    Their names are quite self-explanatory. I have them set to t so whenever I queue a build 
    or deploy, the status buffer for the relevant project opens up and I can check the progress.
    
