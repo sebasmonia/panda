@@ -21,38 +21,12 @@
 ;;   2. Customize 'panda' to add the Bamboo URL or manually:
 ;;      (setq 'panda-api-url "https://bamboo.yourorg.com/rest/api/latest"))
 ;;      - No trailing / -
-;;   3. Optionally, customize or manually set panda-username if you don't want
-;;      to enter your user name on each session
-;;   4. There's a keymay provided for convenience
+;;   3. There's a keymay provided for convenience
 ;;       (require 'panda)
 ;;        (global-set-key (kbd "C-c b") 'panda-map) ;; b for "Bamboo"
 ;;
-;;   The first request to Bamboo will ask for user/pass and then cache them in
-;;   memory as long as Emacs is open.  The information on the projects and plans
-;;   is retrieved once and cached for the session.  Branches for each plan are
-;;   cached as required.  Information about the deployment projects is cached
-;;   at once too.  Call panda-refresh-cache to force a reload of all items.
-;;
-;;   The commands supported in this version are:
-;;
-;;   Interactive:
-;;
-;;   panda-queue-build: starts a new build, interactively requests a project,
-;;                      plan and branch
-;;   panda-build-results: gets the last 7 (by default) builds for a particular
-;;                        branch.
-;;   panda-queue-deploy: starts a new deploy, interactively requests a plan,
-;;                       environment and deploy.
-;;   panda-deploy-status: gets the status of all environments for a deploy
-;;                        project.
-;;   panda-clear-credentials: force inputting user/pass in the next API call.
-;;   panda-refresh-cache: re-fetch list of build plans and deploy projects.
-;;
-;;   Non interactive:
-;;   panda-build-results-branch: if you know you branch key you can call this
-;;                               function from elisp to display the build status
-;;
-;;   In the roadmap: create deploys from builds, improve documentation
+;; For a detailed user manual see:
+;; https://github.com/sebasmonia/panda/blob/master/README.md
 
 ;;; Code:
 
@@ -642,8 +616,8 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
   (alist-get 'nextVersionName (panda--api-call (format "/deploy/projectVersioning/%s/nextVersion" did)
                                                (concat "resultKey=" build-key))))
 
-(defun panda-queue-deploy (&optional project)
-  "Queue a deploy.  If PROJECT is not provided, select it interactively."
+(defun panda-queue-deploy (&optional project environment)
+  "Queue a deploy.  If PROJECT and ENVIRONMENT are not provided, select them interactively."
   (interactive)
   (let* ((project-name (or project (panda--select-deploy-project)))
          (metadata (panda--agetstr project-name (panda--deploys)))
@@ -652,8 +626,9 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
          (deploy-data (panda--deploys-for-id did))
          (selected-release (completing-read "Select release: "
                                                 (mapcar 'first deploy-data)))
-         (selected-environment (completing-read "Select an environment: "
-                                                (mapcar 'first environments)))
+         (selected-environment (or environment
+                                   (completing-read "Select an environment: "
+                                                    (mapcar 'first environments))))
          (confirmed t)) ;; we'll check if there's a regex match later
     (when (not (string-empty-p panda-deploy-confirmation-regex))
       (if (string-match-p panda-deploy-confirmation-regex selected-environment)
@@ -668,7 +643,9 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                                    (car (panda--agetstr selected-release deploy-data)))
                            "POST")
           (panda--message "Deployment requested")
-          (panda--show-deploy-status project-name)) ;; this is busy enough at is it, extracted showing status
+          (if (and project environment) ;; not 100% correct way of identifying calls from the deploy status buffer
+              (panda-deploy-status project) ;; just show it/update it
+            (panda--show-deploy-status project-name))) ;; depends on the config
       (message "Deployment cancelled"))))
 
 (defun panda--show-deploy-status (project-name)
@@ -715,8 +692,11 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
       (local-set-key "b" (lambda ()
                            (interactive)
                            (panda--browse (format panda--browse-deploy-project panda--deploy-project-id))))
+      (local-set-key "q" (lambda ()
+                           (interactive)
+                           (panda-queue-deploy panda--project-name (tabulated-list-get-id))))
       (switch-to-buffer buffer)
-      (panda--message (concat "Listing deploy status for " project-name ". Press b to open the deploy project in a browser, g to refresh.")))))
+      (panda--message (concat "Listing deploy status for " project-name ". Press b to open the deploy project in a browser, q to queue a deploy under point, g to refresh.")))))
 
 (defun panda--format-deploy-status (deploy-status)
   "Format DEPLOY-STATUS for tabulated output."
