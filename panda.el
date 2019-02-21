@@ -104,6 +104,7 @@ If yes, automatically open it.  No to never ask.  Set to 'ask (default) to be pr
 
 (defvar panda--branch-key nil "Buffer local variable for panda--build-status-mode.")
 (defvar panda--project-name nil "Buffer local variable for panda--deploy-results-mode.")
+(defvar panda--deploy-project-id nil "Buffer local variable for panda--deploy-results-mode.")
 
 (defvar panda--browse-build "/browse/%s" "What to add to 'panda-browser-url to open builds in the browser.")
 (defvar panda--browse-deploy-project "/deploy/viewDeploymentProjectEnvironments.action?id=%s" "What to add to 'panda-browser-url to open deploy projects in the browser.")
@@ -215,39 +216,6 @@ Artifacts:
   "Do 'alist-get' for KEY in ALIST with string keys."
   (alist-get key alist nil nil 'equal))
 
-(defun panda--name-key-pair (element)
-  "Return an alist name . key of ELEMENT."
-  (cons (alist-get 'name element)
-        (alist-get 'key element)))
-
-(defun panda--json-nav (keys data)
-  "Get subsequent KEYS out of JSON-parsed DATA."
-  (let ((output data))
-    (dolist (k keys output)
-      (setq output (alist-get k output)))))
-
-(defun panda--get-pairs (key1 key2 items)
-  "Extract from the elements in ITEMS a cons cell with values (KEY1 . KEY2)."
-  (mapcar (lambda (i) (cons (alist-get key1 i) (alist-get key2 i))) items))
-
-(defun panda--printable-alist (keys-names alist)
-  "Return a new ALIST if the keys are in KEYS-NAMES, using the later as key."
-  (let ((result nil))
-    (dolist (k-n keys-names result)
-      (destructuring-bind (key . name) k-n
-        (push (cons name
-                    (alist-get key alist)) result)))))
-
-(defun panda--extract-alist (keys alist)
-  "Extract KEYS from ALIST, return a new list."
-  (let ((result nil))
-    (dolist (k keys (reverse result))
-      (let ((value (alist-get k alist)))
-        (unless value
-          (setq value ""))
-        (push value result)))))
-
-
 ;;------------------Cache for projects, plans, and branches-----------------------
 
 (defun panda-clear-credentials ()
@@ -268,19 +236,20 @@ Artifacts:
   ;; If you have more than 10000 projects I doubt you are using this package
   (let* ((response (panda--api-call "/project" "expand=projects.project.plans&max-results=10000"))
          ;; convert vector to list
-         (data (append (panda--json-nav '(projects project) response) nil))
+         (data (let-alist response (append .projects.project nil)))
          (project nil)
          (plans nil))
     (setq panda--projects-cache nil)
     (setq panda--plans-cache nil)
     (setq panda--branches-cache nil)
     (dolist (proj data)
-      (setq project (panda--name-key-pair proj))
-      (setq plans (panda--get-pairs 'name 'key
-                                    (panda--json-nav '(plans plan) proj)))
-      (push project panda--projects-cache)
-      (push (cons (cdr project) plans) panda--plans-cache)))
-  (panda--message "Build cache updated!"))
+      (let-alist proj
+        (setq project (cons .name .key))
+        (setq plans (mapcar (lambda (a-plan) (let-alist a-plan (cons .name .key)))
+                            .plans.plan))
+        (push project panda--projects-cache)
+        (push (cons (cdr project) plans) panda--plans-cache)))
+    (panda--message "Build cache updated!")))
 
 (defun panda--refresh-cache-deploys ()
   "Refresh the cache of deploys."
@@ -297,22 +266,19 @@ Artifacts:
 
 (defun panda--format-deploy-entry (deploy-project)
   "Convert a DEPLOY-PROJECT to the cache format."
-  (let ((did (alist-get 'id deploy-project))
-        ;; (plan-key (panda--json-nav '(planKey key) deploy-project))
-        (plan-key (alist-get 'name deploy-project))
-        (environments (panda--format-environments-entry
-                       (alist-get 'environments deploy-project))))
-    (unless plan-key
-      (message (prin1-to-string deploy-project)))
-    (cons plan-key (cons did environments))))
+  (let-alist deploy-project
+    (cons .name
+          (cons .id
+                (panda--format-environments-entry .environments)))))
 
 (defun panda--format-environments-entry (deploy-envs)
   "Convert DEPLOY-ENVS to the cache format, only for allowedToExecute environments."
   (let ((as-list (append deploy-envs nil))
         (valid-envs nil))
     (dolist (environment as-list valid-envs)
-      (when (eq (panda--json-nav '(operations allowedToExecute) environment) t)
-        (push (panda--extract-alist '(name id) environment) valid-envs)))))
+      (let-alist environment
+        (when .operations.allowedToExecute
+          (push (list .name .id) valid-envs))))))
 
 (defun panda--projects ()
   "Get cached list of projects, fetch them if needed."
@@ -332,11 +298,14 @@ Artifacts:
     (unless in-cache
       (panda--message "Caching branches for plan...")
       (let* ((data (panda--api-call (concat "/plan/" plan-key "/branch")))
-             (branches-data (panda--json-nav '(branches branch) data))
-             (branches (panda--get-pairs 'shortName 'key branches-data)))
-        (push (cons panda--base-plan plan-key) branches) ;; adding master plan
-        (push (cons plan-key branches) panda--branches-cache)
-        (setq in-cache branches)
+             (formatted nil))
+        (let-alist data
+          (setq formatted
+                (mapcar (lambda (br) (let-alist br (cons .shortName .key)))
+                        .branches.branch)))
+        (push (cons panda--base-plan plan-key) formatted) ;; adding master plan
+        (push (cons plan-key formatted) panda--branches-cache)
+        (setq in-cache formatted)
         (panda--message "Caching branches for plan...")))
     in-cache))
 
@@ -413,33 +382,36 @@ If provided PROJECT and PLAN won't be prompted."
   "Show a buffer with the details of BUILD-KEY.  Invoked from build status list."
   (let* ((data (panda--api-call (concat "/result/" build-key)
                                 "expand=changes,metadata,artifacts,comments,jiraIssues,variable,stages"))
-         (project-name (alist-get 'projectName data))
-         (master-plan (or (panda--json-nav '(master shortName) data) ""))
-         ;; all these keys can be gotten in one go as they in the base level and displayed together
-         (middle-section (panda--extract-alist '(planName state
-                                                          prettyBuildStartedTime prettyBuildCompletedTime
-                                                          buildDurationDescription buildReason buildTestSummary)
-                                               data))
-         (jira-formatted (panda--build-info-format-jira-issues (panda--json-nav '(jiraIssues issue) data)))
-         (changes-formatted (panda--build-info-format-changes (panda--json-nav '(changes change) data)))
-         (artifacts-formatted "--") ;; don't have any to test so...
-         (data-to-display (append (list build-key project-name master-plan)
-                                  middle-section
-                                  (list jira-formatted changes-formatted artifacts-formatted)))
          (buffer-name (concat "*Panda - Build details " build-key))
-         (buffer (get-buffer-create buffer-name)))
-    (with-current-buffer buffer
-      (setq buffer-read-only nil)
-      (kill-region (point-min) (point-max)) ;; in case of an update
-      (insert (apply 'format panda--build-buffer-template data-to-display))
-      (setq buffer-read-only t)
-      (switch-to-buffer-other-window buffer)
-      (panda--message (concat "Showing details for build" build-key)))))
+         (buffer (get-buffer-create buffer-name))
+         (data-to-display nil))
+    (let-alist data
+      (setq data-to-display
+            (list build-key
+                  .projectName
+                  (or .master.shortName "")
+                  .planName
+                  .state
+                  .prettyBuildStartedTime
+                  .prettyBuildCompletedTime
+                  .buildDurationDescription
+                  .buildReason
+                  .buildTestSummary
+                  (panda--build-info-format-jira-issues .jiraIssues.issue)
+                  (panda--build-info-format-changes .changes.change)
+                  "--")) ;; don't have any to test so...
+      (with-current-buffer buffer
+        (setq buffer-read-only nil)
+        (kill-region (point-min) (point-max)) ;; in case of an update
+        (insert (apply 'format panda--build-buffer-template data-to-display))
+        (setq buffer-read-only t)
+        (switch-to-buffer-other-window buffer)
+        (panda--message (concat "Showing details for build " build-key))))))
 
 (defun panda--build-info-format-jira-issues (issues)
   "Create a printable string out of ISSUES."
   (let ((to-concat (mapcar (lambda(x) (apply 'format "%s\t%s\t%s\t%s\t\"%s\""
-                                             (panda--extract-alist '(key issueType status assignee summary) x)))
+                                             (let-alist x (list .key .issueType .status .asignee .summary))))
                            issues))
         (printable ""))
     (when to-concat
@@ -449,7 +421,7 @@ If provided PROJECT and PLAN won't be prompted."
 (defun panda--build-info-format-changes (changes-list)
   "Create a printable string out of CHANGES-LIST."
   (let ((to-concat (mapcar (lambda(x) (apply 'format "%s\t%s"
-                                             (panda--extract-alist '(changesetId fullName) x)))
+                                             (let-alist x (list .changesetId .fullName))))
                            changes-list))
         (printable ""))
     (when to-concat
@@ -532,22 +504,24 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
     (let* ((target-url (concat "/result/" branch-key))
            (parameters (concat "max-results=" (number-to-string panda-latest-max-results)
                                "&includeAllStates=true"))
-           (data (panda--api-call target-url parameters))
-           (build-results (panda--json-nav '(results result) data)))
-      (mapcar (lambda (build) (alist-get 'key build))
-              build-results)))
+           (data (panda--api-call target-url parameters)))
+      (let-alist data
+        (mapcar (lambda (build) (alist-get 'key build))
+                .results.result))))
 
 (defun panda--fetch-build-bykey (build-key)
   "Return the data for BUILD-KEY formatted for tabulated mode."
-  (let* ((build-data (panda--api-call (concat "/result/" build-key)))
-         (plan-key (or (panda--json-nav '(master key) build-data) ;; for branches this will be non-empty
-                       (panda--json-nav '(plan key) build-data))) ;; if we get here this is a base plan
-         (filtered-data (panda--extract-alist '(key state prettyBuildStartedTime prettyBuildCompletedTime
-                                                    buildDurationDescription)
-                                              build-data)))
-    (setq filtered-data (append filtered-data (list plan-key)))
-    ;; tabulated list requires a list with an ID and a vector
-    (list (car filtered-data) (vconcat filtered-data))))
+  (let* ((build-data (panda--api-call (concat "/result/" build-key))))
+    (let-alist build-data
+      ;; tabulated list requires a list with an ID and a vector
+      (list .key
+            (vector .key
+                    .state
+                    .prettyBuildStartedTime
+                    .prettyBuildCompletedTime
+                    .buildDurationDescription
+                    (or .master.key ;; for branches this will be non-empty
+                        .plan.key)))))) ;; if we get here this is a base plan
 
 (define-derived-mode panda--build-results-mode tabulated-list-mode "Panda build results view" "Major mode to display Bamboo's build results."
   (setq tabulated-list-format [("Build key" 20 nil)
@@ -663,7 +637,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
          (data (panda--api-call url parameters))
          (deploys (alist-get 'versions data)))
     (mapcar
-     (lambda (dep) (panda--extract-alist '(name id) dep))
+     (lambda (dep) (let-alist dep (list .name .id)))
      deploys)))
 
 (defun panda-deploy-status (&optional project)
@@ -700,15 +674,15 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
 
 (defun panda--format-deploy-status (deploy-status)
   "Format DEPLOY-STATUS for tabulated output."
-  (let* ((env-name (panda--json-nav '(environment name) deploy-status))
-         (result (alist-get 'deploymentResult deploy-status))
-         (deploy-name (panda--json-nav '(deploymentVersion name) result))
-         (state (alist-get 'lifeCycleState result))
-         (status (alist-get 'deploymentState result))
-         (started (panda--unixms-to-string (alist-get 'startedDate result)))b
-         (completed (panda--unixms-to-string (alist-get 'finishedDate result))))
-    ;; tabulated list requires a list with an ID and a vector
-    (list env-name (vector env-name state status started completed deploy-name))))
+  ;; tabulated list requires a list with an ID and a vector
+  (let-alist deploy-status
+    (list .environment.name
+          (vector .environment.name
+                  .deploymentResult.lifeCycleState
+                  .deploymentResult.deploymentState
+                  (panda--unixms-to-string .deploymentResult.startedDate)
+                  (panda--unixms-to-string .deploymentResult.finishedDate)
+                  .deploymentResult.deploymentVersion.name))))
 
 (define-derived-mode panda--deploy-results-mode tabulated-list-mode "Panda deploy results view" "Major mode to display Bamboo's deploy results."
   (setq tabulated-list-format [("Environment" 35 nil)
