@@ -522,8 +522,8 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
             (vector .key
                     .state
                     .prettyBuildStartedTime
-                    .prettyBuildCompletedTime
-                    .buildDurationDescription
+                    (or .prettyBuildCompletedTime "")
+                    (or .buildDurationDescription "")
                     (or .master.key ;; for branches this will be non-empty
                         .plan.key)))))) ;; if we get here this is a base plan
 
@@ -741,7 +741,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                   .deploymentResult.deploymentState
                   (panda--unixms-to-string .deploymentResult.startedDate)
                   (panda--unixms-to-string .deploymentResult.finishedDate)
-pppp                  .deploymentResult.deploymentVersion.name))))
+                  .deploymentResult.deploymentVersion.name))))
 
 (define-derived-mode panda--deploy-results-mode tabulated-list-mode "Panda deploy results view" "Major mode to display Bamboo's deploy results."
   (setq tabulated-list-format [("Environment" 35 nil)
