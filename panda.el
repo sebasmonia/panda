@@ -140,6 +140,8 @@ Artifacts:
 ;; Status commands
 (define-key panda-map (kbd "s b") 'panda-build-results)
 (define-key panda-map (kbd "s d") 'panda-deploy-status)
+(define-key panda-map (kbd "s e") 'panda-environment-history)
+
 ;; Create
 (define-key panda-map (kbd "c") 'panda-create-release)
 ;; Refresh
@@ -361,13 +363,15 @@ If provided PROJECT and PLAN won't be prompted."
   (let ((format-str "%Y-%m-%d %T")
         (unix-epoch "1970-01-01T00:00:00+00:00")
         (converted "")
-        (seconds nil)) ;; default to empty string
-    (ignore-errors
-      (setq seconds (/ unix-milliseconds 1000))
-      (setq converted
-            (format-time-string format-str
-                                (time-add (date-to-time unix-epoch)
-                                          seconds))))
+        (seconds nil))
+    (condition-case nil
+        (progn
+          (setq seconds (/ unix-milliseconds 1000))
+          (setq converted
+                (format-time-string format-str
+                                    (time-add (date-to-time unix-epoch)
+                                              seconds))))
+      (error (setq converted "")))
     converted))
 
 (defun panda--browse (path)
@@ -669,8 +673,63 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
       (local-set-key "q" (lambda ()
                            (interactive)
                            (panda-queue-deploy panda--project-name (tabulated-list-get-id))))
+      (local-set-key "h" (lambda ()
+                           (interactive)
+                           (panda-environment-history (tabulated-list-get-id))))
       (switch-to-buffer buffer)
-      (panda--message (concat "Listing deploy status for " project-name ". Press b to open the deploy project in a browser, q to queue a deploy under point, g to refresh.")))))
+      (panda--message (concat "Listing deploy status for " project-name ". Press b to open the deploy project in a browser, q to queue a deploy under point, h to see history for an environment, g to refresh.")))))
+
+(defun panda-environment-history (&optional env-id)
+  "Show the history of ENV-ID in a new buffer.  If env-id is not provided, it will be prompted."
+  (interactive)
+  (unless env-id
+    (let* ((project (panda--select-deploy-project))
+           (project-data (panda--agetstr project (panda--deploys))))
+      (setq env-id (car (panda--agetstr  (completing-read "Select an environment: "
+                                                          (mapcar 'car (cdr project-data)))
+                                         project-data)))))
+  (let* ((environment-data (panda--api-call (format "/deploy/environment/%s/results" env-id)))
+         (data-formatted (mapcar 'panda--format-env-history (alist-get 'results environment-data)))
+         (environment-name (panda--env-name-from-id env-id))
+         (buffer-name (concat "*Panda - Environment history " environment-name "*"))
+         (buffer (get-buffer-create buffer-name)))
+    (with-current-buffer buffer
+      (panda--environment-history-mode)
+      (setq tabulated-list-entries data-formatted)
+      (tabulated-list-print)
+      (switch-to-buffer buffer))))
+
+(defun panda--env-name-from-id (env-id)
+  "Find the environment name from ENV-ID."
+  ;; this is really inneficient. Should revisit.
+  ;; still faster than making an API call most likely
+  (let ((found nil))
+    (dolist (deploy-data (panda--deploys) found)
+      (let* ((env-data (nthcdr 2 deploy-data))
+             (id-matched (cl-remove-if-not (lambda (env) (eq env-id (cadr env)))
+                                           env-data)))
+        (when id-matched
+          (setq found (caar id-matched)))))
+    found))
+
+(define-derived-mode panda--environment-history-mode tabulated-list-mode "Panda environment history view" "Major mode to display Bamboo's environment history."
+  (setq tabulated-list-format [("State" 12 nil)
+                               ("Status" 8)
+                               ("Started" 20 nil)
+                               ("Completed" 20 nil)
+                               ("Version name" 0 nil)])
+  (setq tabulated-list-padding 1)
+  (tabulated-list-init-header))
+
+(defun panda--format-env-history (deploy-data)
+  "Format DEPLOY-DATA for tabulated output."
+  (let-alist deploy-data
+    (list .id
+          (vector .deploymentState
+                  .lifeCycleState
+                  (panda--unixms-to-string .startedDate)
+                  (panda--unixms-to-string .finishedDate)
+                  .deploymentVersionName))))
 
 (defun panda--format-deploy-status (deploy-status)
   "Format DEPLOY-STATUS for tabulated output."
@@ -682,7 +741,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                   .deploymentResult.deploymentState
                   (panda--unixms-to-string .deploymentResult.startedDate)
                   (panda--unixms-to-string .deploymentResult.finishedDate)
-                  .deploymentResult.deploymentVersion.name))))
+pppp                  .deploymentResult.deploymentVersion.name))))
 
 (define-derived-mode panda--deploy-results-mode tabulated-list-mode "Panda deploy results view" "Major mode to display Bamboo's deploy results."
   (setq tabulated-list-format [("Environment" 35 nil)

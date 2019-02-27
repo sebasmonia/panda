@@ -23,11 +23,12 @@ Place panda.el in your load-path.  Or install from MELPA (preferred).
 The next step would be to use customize for panda. Options are documented, below some of them:
 
 1. **REQUIRED**: Add the Bamboo API URL _(Notice there's no trailing /)_:
+
 ```elisp
     (setq 'panda-api-url "https://bamboo.yourorg.com/rest/api/latest")
 ```
 
-    There's also `panda-browser-url`, which is used to open elements in your default browser.
+There's also `panda-browser-url`, which is used to open elements in your default browser.
 
 2. You can set `panda-username` if you don't want to enter your user name on each session
 
@@ -54,7 +55,7 @@ There's a keymay provided for convenience:
 
 The keymap use long sequences, but it's also quite mnemonic.
 
-`C-c b s` (`s` => status), then either `b` or `d` for build or deploy status, respectively.
+`C-c b s` (`s` => status), then either `b`, `d` or `e` for build, deploy or environment status, respectively.
 
 `C-c b q` (`q` =>  queue), then either `b` or `d` to queue a build or a deploy.
 
