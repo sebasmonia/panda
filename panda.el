@@ -442,6 +442,7 @@ If provided PROJECT and PLAN won't be prompted."
   (let* ((split-data (split-string build-name "_"))
          (build-number (car (last split-data)))
          (branch-name (mapconcat 'identity (butlast split-data) "_")))
+    (setq branch-name (replace-regexp-in-string "/" "-" branch-name))
     (unless (string= branch-name "develop")
       (setq plan-key (panda--agetstr branch-name (panda--branches plan-key))))
     (panda--api-call (concat "/result/" plan-key "-" build-number))))
