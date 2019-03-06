@@ -317,6 +317,10 @@ Artifacts:
     (panda-refresh-cache))
   panda--deploys-cache)
 
+(defun panda--all-environments ()
+  "Return all environments from the cache, in a single list."
+  (apply 'append (mapcar (lambda (deploy-project) (nthcdr 2 deploy-project))
+                         (panda--deploys))))
 
 ;;------------------Common UI utilities-------------------------------------------
 
@@ -438,7 +442,7 @@ If provided PROJECT and PLAN won't be prompted."
   (let* ((split-data (split-string build-name "_"))
          (build-number (car (last split-data)))
          (branch-name (mapconcat 'identity (butlast split-data) "_")))
-    (unless (string-equal branch-name "develop")
+    (unless (string= branch-name "develop")
       (setq plan-key (panda--agetstr branch-name (panda--branches plan-key))))
     (panda--api-call (concat "/result/" plan-key "-" build-number))))
 
@@ -577,7 +581,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
         (build-status (elt selected-entry 1))
         (did nil)
         (release-name nil))
-    (if (string-equal panda--build-status-for-release build-status)
+    (if (string= panda--build-status-for-release build-status)
         (progn
           (setq did (panda--get-deployid-for-plan-key plan-key))
           (setq release-name (read-string "Release name: " (panda--proposed-release-name did build-key)))
@@ -676,7 +680,8 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                            (panda-queue-deploy panda--project-name (tabulated-list-get-id))))
       (local-set-key "h" (lambda ()
                            (interactive)
-                           (panda-environment-history (tabulated-list-get-id))))
+                           (panda-environment-history (panda--env-id-from-name
+                                                       (tabulated-list-get-id)))))
       (switch-to-buffer buffer)
       (panda--message (concat "Listing deploy status for " project-name ". Press b to open the deploy project in a browser, q to queue a deploy under point, h to see history for an environment, g to refresh.")))))
 
@@ -685,10 +690,10 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
   (interactive)
   (unless env-id
     (let* ((project (panda--select-deploy-project))
-           (project-data (panda--agetstr project (panda--deploys))))
-      (setq env-id (car (panda--agetstr  (completing-read "Select an environment: "
-                                                          (mapcar 'car (cdr project-data)))
-                                         project-data)))))
+           (project-data (panda--agetstr project (panda--deploys)))
+           (env-name (completing-read "Select an environment: "
+                                      (mapcar 'car (cdr project-data)))))
+      (setq env-id (panda--env-id-from-name env-name))))
   (let* ((environment-data (panda--api-call (format "/deploy/environment/%s/results" env-id)))
          (data-formatted (mapcar 'panda--format-env-history (alist-get 'results environment-data)))
          (environment-name (panda--env-name-from-id env-id))
@@ -712,6 +717,11 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
         (when id-matched
           (setq found (caar id-matched)))))
     found))
+
+(defun panda--env-id-from-name (env-name)
+  "Obtain the env-id for ENV-NAME."
+  (cadar (cl-remove-if-not (lambda (env) (string= env-name (car env)))
+                           (panda--all-environments))))
 
 (define-derived-mode panda--environment-history-mode tabulated-list-mode "Panda environment history view" "Major mode to display Bamboo's environment history."
   (setq tabulated-list-format [("State" 12 nil)
