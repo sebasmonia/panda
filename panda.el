@@ -518,10 +518,11 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
   (let* ((build-data (panda--api-call (concat "/result/" build-key))))
     (let-alist build-data
       ;; tabulated list requires a list with an ID and a vector
+      ;; and also doesn't like nil values, hence the 'or' fest
       (list .key
             (vector .key
-                    .state
-                    .prettyBuildStartedTime
+                    (or .state "")
+                    (or .prettyBuildStartedTime "")
                     (or .prettyBuildCompletedTime "")
                     (or .buildDurationDescription "")
                     (or .master.key ;; for branches this will be non-empty
