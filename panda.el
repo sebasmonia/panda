@@ -92,7 +92,6 @@ If yes, automatically open it.  No to never ask.  Set to 'ask (default) to be pr
                  (const :tag "Yes" t)
                  (const :tag "Ask" ask)))
 
-
 (defvar panda--auth-string nil "Caches the credentials for API calls.")
 (defvar panda--projects-cache nil "Caches all the build projects the user has access to, in one go.")
 (defvar panda--plans-cache nil "Caches the plans for each build project the user has access to, in one go.")
@@ -327,21 +326,21 @@ Artifacts:
 (defun panda--select-build-project ()
   "Run 'ido-completing-read' to select a project.  Return the project key."
   (let* ((projects (panda--projects))
-         (selected (completing-read "Select project: "
+         (selected (ido-completing-read "Select project: "
                                         (mapcar 'first projects))))
     (panda--agetstr selected projects)))
 
 (defun panda--select-build-plan (project-key)
   "Run 'ido-completing-read' to select a plan under PROJECT-KEY.  Return the plan key."
   (let* ((plans (panda--plans project-key))
-         (selected (completing-read "Select plan: "
+         (selected (ido-completing-read "Select plan: "
                                         (mapcar 'first plans))))
     (panda--agetstr selected plans)))
 
 (defun panda--select-build-branch (plan-key)
   "Run 'ido-completing-read' to select a plan under PLAN-KEY  Return the branch key."
   (let* ((branches (panda--branches plan-key))
-         (selected (completing-read "Select branch: "
+         (selected (ido-completing-read "Select branch: "
                                         (mapcar 'first branches))))
     (panda--agetstr selected branches)))
 
@@ -359,7 +358,7 @@ If provided PROJECT and PLAN won't be prompted."
 (defun panda--select-deploy-project ()
   "Run 'ido-completing-read' to select a deploy project.  Return the project data."
   (let* ((deploy-names (mapcar 'car (panda--deploys)))
-         (selected (completing-read "Select deploy project: " deploy-names)))
+         (selected (ido-completing-read "Select deploy project: " deploy-names)))
     selected))
 
 (defun panda--unixms-to-string (unix-milliseconds)
@@ -554,7 +553,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
     ;; call and be done with it
     (let* ((did (panda--get-deployid-for-plan-key plan-key))
            (formatted (panda--successful-builds-for-release branch-key))
-           (selected-build (completing-read "Select a build: " formatted))
+           (selected-build (ido-completing-read "Select a build: " formatted))
            (release-name nil))
       (setq selected-build (car (split-string selected-build))) ;; really shady
       (setq release-name (read-string "Release name: " (panda--proposed-release-name did selected-build)))
@@ -608,10 +607,10 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
          (did (car metadata))
          (environments (cdr metadata))
          (deploy-data (panda--deploys-for-id did))
-         (selected-release (completing-read "Select release: "
+         (selected-release (ido-completing-read "Select release: "
                                                 (mapcar 'first deploy-data)))
          (selected-environment (or environment
-                                   (completing-read "Select an environment: "
+                                   (ido-completing-read "Select an environment: "
                                                     (mapcar 'first environments))))
          (confirmed t)) ;; we'll check if there's a regex match later
     (when (not (string-empty-p panda-deploy-confirmation-regex))
@@ -683,8 +682,11 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                            (interactive)
                            (panda-environment-history (panda--env-id-from-name
                                                        (tabulated-list-get-id)))))
+      (local-set-key "l" (lambda ()
+                           (interactive)
+                           (panda--deploy-log (elt (tabulated-list-get-entry) 5))))
       (switch-to-buffer buffer)
-      (panda--message (concat "Listing deploy status for " project-name ". Press b to open the deploy project in a browser, q to queue a deploy under point, h to see history for an environment, g to refresh.")))))
+      (panda--message (concat "Listing deploy status for " project-name ". Press b to open the deploy project in a browser, q to queue a deploy under point, h to see history for an environment, l for logs, g to refresh.")))))
 
 (defun panda-environment-history (&optional env-id)
   "Show the history of ENV-ID in a new buffer.  If env-id is not provided, it will be prompted."
@@ -692,7 +694,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
   (unless env-id
     (let* ((project (panda--select-deploy-project))
            (project-data (panda--agetstr project (panda--deploys)))
-           (env-name (completing-read "Select an environment: "
+           (env-name (ido-completing-read "Select an environment: "
                                       (mapcar 'car (cdr project-data)))))
       (setq env-id (panda--env-id-from-name env-name))))
   (let* ((environment-data (panda--api-call (format "/deploy/environment/%s/results" env-id)))
@@ -704,7 +706,31 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
       (panda--environment-history-mode)
       (setq tabulated-list-entries data-formatted)
       (tabulated-list-print)
+      (local-set-key "l" (lambda ()
+                           (interactive)
+                           (panda--deploy-log (tabulated-list-get-id))))
+      (switch-to-buffer buffer)
+      (panda--message (concat "Showing deployment history. Press l to see a deploy log for the run under point.")))))
+
+(defun panda--deploy-log (deploy-id)
+  "Show the log of DEPLOY-ID in a new buffer."
+  (let* ((deploy-data (panda--api-call (format "/deploy/result/%s" deploy-id)
+                                       ;; questionable, if you have more than 1 million lines log
+                                       ;; there are bigger problems if we actually get it all...
+                                       "includeLogs=true&max-results=1000000"))
+         (logs (panda--deploy-log-from-deploy-data deploy-data))
+         (buffer-name (format "*Panda - Deploy log %s*" deploy-id))
+         (buffer (get-buffer-create buffer-name)))
+    (with-current-buffer buffer
+      (erase-buffer)
+      (insert logs)
+      (goto-char (point-min))
       (switch-to-buffer buffer))))
+
+(defun panda--deploy-log-from-deploy-data (deploy-data)
+  "Extract the log entries from DEPLOY-DATA."
+  (let-alist deploy-data
+    (mapconcat (lambda (log-entry) (alist-get 'unstyledLog log-entry)) .logEntries.logEntry "\n")))
 
 (defun panda--env-name-from-id (env-id)
   "Find the environment name from ENV-ID."
@@ -753,6 +779,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                   .deploymentResult.deploymentState
                   (panda--unixms-to-string .deploymentResult.startedDate)
                   (panda--unixms-to-string .deploymentResult.finishedDate)
+                  (format "%s" .deploymentResult.id)
                   .deploymentResult.deploymentVersion.name))))
 
 (define-derived-mode panda--deploy-results-mode tabulated-list-mode "Panda deploy results view" "Major mode to display Bamboo's deploy results."
@@ -761,6 +788,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                                ("Status" 8)
                                ("Started" 20 nil)
                                ("Completed" 20 nil)
+                               ("Deploy ID" 12 nil)
                                ("Version name" 0 nil)])
   (set (make-local-variable 'panda--project-name) nil)
   (set (make-local-variable 'panda--deploy-project-id) nil)
