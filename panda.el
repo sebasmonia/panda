@@ -722,15 +722,27 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
          (buffer-name (format "*Panda - Deploy log %s*" deploy-id))
          (buffer (get-buffer-create buffer-name)))
     (with-current-buffer buffer
+      (setq buffer-read-only nil)
       (erase-buffer)
       (insert logs)
-      (goto-char (point-min))
+      ;; When reading logs, usually you want to see last first...
+      ;; OR: add &optional, and bind "g" using that optional param
+      ;; for "don't go up after insert"
+      ;; (goto-char (point-min))
+      (setq buffer-read-only t)
+      (local-set-key "g" (lambda ()
+                           (interactive)
+                           (panda--deploy-log deploy-id)))
+      (panda--message (format "Showing log for deploy %s. Press g to refresh." deploy-id))
       (switch-to-buffer buffer))))
 
 (defun panda--deploy-log-from-deploy-data (deploy-data)
   "Extract the log entries from DEPLOY-DATA."
   (let-alist deploy-data
-    (mapconcat (lambda (log-entry) (alist-get 'unstyledLog log-entry)) .logEntries.logEntry "\n")))
+    (mapconcat (lambda (log-entry) (format "[%s] - %s"
+                                           (alist-get 'formattedDate log-entry)
+                                           (alist-get 'unstyledLog log-entry)))
+               .logEntries.logEntry "\n")))
 
 (defun panda--env-name-from-id (env-id)
   "Find the environment name from ENV-ID."
