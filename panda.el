@@ -132,6 +132,12 @@ Changes:
 Artifacts:
 %s" "Template to call 'format' for the build details buffer.")
 
+(defvar-local panda--branch-key nil "Used in `panda--build-results-mode` to store the current branch key.")
+
+(defvar-local panda--project-name nil "Used in `panda--deploy-results-mode` to store the current project.")
+
+(defvar-local panda--deploy-project-id nil "Used in `panda--deploy-results-mode` to store the current deployment project ID.")
+
 (define-prefix-command 'panda-map)
 ;; Queue commands
 (define-key panda-map (kbd "q b") 'panda-queue-build)
@@ -538,7 +544,6 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                                ("Started" 22)
                                ("Finished" 22 nil)
                                ("Duration" 0 nil)])
-  (set (make-local-variable 'panda--branch-key) nil)
   (setq tabulated-list-padding 1)
   (tabulated-list-init-header))
 
@@ -685,8 +690,8 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
       (local-set-key "l" (lambda ()
                            (interactive)
                            (panda--deploy-log (elt (tabulated-list-get-entry) 5))))
-      (switch-to-buffer buffer)
-      (panda--message (concat "Listing deploy status for " project-name ". Press b to open the deploy project in a browser, q to queue a deploy under point, h to see history for an environment, l for logs, g to refresh.")))))
+      (switch-to-buffer buffer))
+    (panda--message (concat "Listing deploy status for " project-name ". Press b to open the deploy project in a browser, q to queue a deploy under point, h to see history for an environment, l for logs, g to refresh."))))
 
 (defun panda-environment-history (&optional env-id)
   "Show the history of ENV-ID in a new buffer.  If env-id is not provided, it will be prompted."
@@ -802,8 +807,6 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                                ("Completed" 20 nil)
                                ("Deploy ID" 12 nil)
                                ("Version name" 0 nil)])
-  (set (make-local-variable 'panda--project-name) nil)
-  (set (make-local-variable 'panda--deploy-project-id) nil)
   (setq tabulated-list-padding 1)
   (tabulated-list-init-header))
 
