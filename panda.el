@@ -171,6 +171,12 @@ Artifacts:
       (insert text)
       (insert "\n"))))
 
+
+(defun panda--show-help (help-message)
+  "Display the *Panda Help* buffer with the text in HELP-MESSAGE."
+  (with-output-to-temp-buffer "*Panda Help*"
+    (princ help-message)))
+
 ;;------------------HTTP Stuff----------------------------------------------------
 
 ;; maybe change parameters order? url, method, qs params, data?
@@ -491,22 +497,8 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
       (setq panda--branch-key branch)
       (setq tabulated-list-entries build-data)
       (tabulated-list-print)
-      (local-set-key "g" (lambda ()
-                           (interactive)
-                           (setq tabulated-list-entries (panda--build-results-data panda--branch-key))
-                           (tabulated-list-print)
-                           (panda--message (concat "Updated list of builds for " panda--branch-key))))
-      (local-set-key "d" (lambda ()
-                           (interactive)
-                           (panda-display-build-info (tabulated-list-get-id))))
-      (local-set-key "b" (lambda ()
-                           (interactive)
-                           (panda--browse (format panda--browse-build (tabulated-list-get-id)))))
-      (local-set-key "c" (lambda ()
-                           (interactive)
-                           (panda--create-release-from-build-status (tabulated-list-get-entry))))
       (switch-to-buffer buffer)
-      (panda--message (concat "Listing builds for " branch ". Press d for build details, b to open the build in the browser, c to create a release, g to refresh.")))))
+      (panda--message (concat "Listing builds for " branch ". Press ? for help and bindings available.")))))
 
 (defun panda--build-results-data (branch-key)
   "Get BRANCH-KEY build data for 'tabulated-list-entries'."
@@ -546,6 +538,49 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                                ("Duration" 0 nil)])
   (setq tabulated-list-padding 1)
   (tabulated-list-init-header))
+
+(define-key panda--build-results-mode-map (kbd "g") 'panda--build-results-refresh)
+(define-key panda--build-results-mode-map (kbd "d") 'panda--build-results-info)
+(define-key panda--build-results-mode-map (kbd "b") 'panda--build-results-browse)
+(define-key panda--build-results-mode-map (kbd "c") 'panda--build-results-create)
+(define-key panda--build-results-mode-map (kbd "?") 'panda--build-results-help)
+
+(defun panda--build-results-refresh ()
+  "Refresh data in a `panda--build-results-mode` buffer."
+  (interactive)
+  (setq tabulated-list-entries (panda--build-results-data panda--branch-key))
+  (tabulated-list-print)
+  (panda--message (concat "Updated list of builds for " panda--branch-key)))
+
+(defun panda--build-results-info ()
+  "Show build info in a `panda--build-results-mode` buffer."
+  (interactive)
+  (panda-display-build-info (tabulated-list-get-id)))
+
+(defun panda--build-results-browse ()
+  "Brose a build from a `panda--build-results-mode` buffer."
+  (interactive)
+  (panda--browse (format panda--browse-build (tabulated-list-get-id))))
+
+(defun panda--build-results-create ()
+  "Create a release from the build under point in a `panda--build-results-mode` buffer."
+  (interactive)
+  (panda--create-release-from-build-status (tabulated-list-get-entry)))
+
+(defun panda--build-results-help ()
+  "Show help for the directories buffer."
+  (interactive)
+  (let ((help-message
+        (concat
+         "--Panda: Build status mode help--\n\n"
+         "In this list you case see the latest deploys for a given branch. You customize the group \"panda\" to "
+         "modify the number of items retrieved.\n\n"
+         "Bindings:\n\n"
+         "* g will refresh the data, as usual in Emacs\n\n"
+         "* d shows the (d)etails for the build under point in a new buffer\n\n"
+         "* b uses `panda-browser-url` to open Bamboo in your default (b)rowser to see build details\n\n"
+         "* c to (c)reate a new release out of the build at point\n\n ")))
+    (panda--show-help help-message)))
 
 ;;------------------Creating deployments and pushing them-------------------------
 
@@ -673,25 +708,8 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
       (setq panda--deploy-project-id did)
       (setq tabulated-list-entries data-formatted)
       (tabulated-list-print)
-      (local-set-key "g" (lambda ()
-                           (interactive)
-                           (panda-deploy-status panda--project-name)
-                           (panda--message (concat "Updated deploy status for " panda--project-name))))
-      (local-set-key "b" (lambda ()
-                           (interactive)
-                           (panda--browse (format panda--browse-deploy-project panda--deploy-project-id))))
-      (local-set-key "q" (lambda ()
-                           (interactive)
-                           (panda-queue-deploy panda--project-name (tabulated-list-get-id))))
-      (local-set-key "h" (lambda ()
-                           (interactive)
-                           (panda-environment-history (panda--env-id-from-name
-                                                       (tabulated-list-get-id)))))
-      (local-set-key "l" (lambda ()
-                           (interactive)
-                           (panda--deploy-log (elt (tabulated-list-get-entry) 5))))
       (switch-to-buffer buffer))
-    (panda--message (concat "Listing deploy status for " project-name ". Press b to open the deploy project in a browser, q to queue a deploy under point, h to see history for an environment, l for logs, g to refresh."))))
+    (panda--message (concat "Listing deploy status for " project-name ". Press ? for help and bindings available."))))
 
 (defun panda-environment-history (&optional env-id)
   "Show the history of ENV-ID in a new buffer.  If env-id is not provided, it will be prompted."
@@ -809,6 +827,54 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                                ("Version name" 0 nil)])
   (setq tabulated-list-padding 1)
   (tabulated-list-init-header))
+
+(define-key panda--deploy-results-mode-map (kbd "g") 'panda--deploy-results-refresh)
+(define-key panda--deploy-results-mode-map (kbd "q") 'panda--deploy-results-queue)
+(define-key panda--deploy-results-mode-map (kbd "b") 'panda--deploy-results-browse)
+(define-key panda--deploy-results-mode-map (kbd "h") 'panda--deploy-results-history)
+(define-key panda--deploy-results-mode-map (kbd "l") 'panda--deploy-results-log)
+(define-key panda--deploy-results-mode-map (kbd "?") 'panda--deploy-results-help)
+
+(defun panda--deploy-results-help ()
+  "Show help for the directories buffer."
+  (interactive)
+  (let ((help-message
+        (concat
+         "--Panda: Deploy status mode help--\n\n"
+         "In this list you case see one entry per environment for a given deployment project."
+         "Bindings:\n\n"
+         "* g will refresh the data, as usual in Emacs\n\n"
+         "* q opens a list of releases to (q)ueue a deployment for the environment under point\n\n"
+         "* b uses `panda-browser-url` to open Bamboo in your default (b)rowser to see environment details\n\n"
+         "* l will open the (l)og for the last deployment of the environment at point\n\n"
+         "* h opens the selected environment's (h)istory in a new buffer\n\n ")))
+    (panda--show-help help-message)))
+
+(defun panda--deploy-results-refresh ()
+  "Reload the current `panda--deploy-results-mode` buffer."
+  (interactive)
+  (panda-deploy-status panda--project-name)
+  (panda--message (concat "Updated deploy status for " panda--project-name)))
+
+(defun panda--deploy-results-browse ()
+  "Open a browser in the deploy under point in `panda--deploy-results-mode`."
+  (interactive)
+  (panda--browse (format panda--browse-deploy-project panda--deploy-project-id)))
+
+(defun panda--deploy-results-queue ()
+  "Queue a deploy for the environment at point in a `panda--deploy-results-mode` list."
+  (interactive)
+  (panda--browse (format panda--browse-deploy-project panda--deploy-project-id)))
+
+(defun panda--deploy-results-history ()
+  "Show the selected environment's history in `panda--deploy-results-mode`."
+  (interactive)
+  (panda-environment-history (panda--env-id-from-name
+                              (tabulated-list-get-id))))
+(defun panda--deploy-results-log ()
+  "Show the log for the last (or running) deploy in `panda--deploy-results-mode`."
+  (interactive)
+  (panda--deploy-log (elt (tabulated-list-get-entry) 5)))
 
 ;; panda-deploy-from-build
 ;; find if a build has a deploy: https://bamboo.starz.com/rest/api/latest/search/versions?searchTerm=build-name&deploymentProjectId=did
