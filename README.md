@@ -53,14 +53,14 @@ There's a keymay provided for convenience:
     (global-set-key (kbd "C-c b") 'panda-map) ;; b for "Bamboo"
 ```
 
-The keymap use long sequences, but it's also quite mnemonic.
+The keymap uses long sequences, but it's also quite mnemonic.
 
 `C-c b s` (`s` => status), then either `b`, `d` or `e` for build, deploy or environment status, respectively.
 
 `C-c b q` (`q` =>  queue), then either `b` or `d` to queue a build or a deploy.
 
-Finally, the status buffers also have some actions associated to them. The echo area will
-show the relevant keys. The most common one is `g` to refresh the data.
+The build and deploy status buffers also have actions associated to them. Use `?` to open a help buffer
+with the list of bindings available.
 
 # Manual
 
