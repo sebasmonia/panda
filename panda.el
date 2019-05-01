@@ -573,8 +573,8 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
   (let ((help-message
         (concat
          "--Panda: Build status mode help--\n\n"
-         "In this list you case see the latest deploys for a given branch. You customize the group \"panda\" to "
-         "modify the number of items retrieved.\n\n"
+         "In this list you case see the latest builds for a given branch. You customize the group `panda` to "
+         "modify the number of \"latest items\" retrieved.\n\n"
          "Bindings:\n\n"
          "* g will refresh the data, as usual in Emacs\n\n"
          "* d shows the (d)etails for the build under point in a new buffer\n\n"
@@ -841,7 +841,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
   (let ((help-message
         (concat
          "--Panda: Deploy status mode help--\n\n"
-         "In this list you case see one entry per environment for a given deployment project."
+         "In this list you case see one entry per environment for a given deployment project.\n\n"
          "Bindings:\n\n"
          "* g will refresh the data, as usual in Emacs\n\n"
          "* q opens a list of releases to (q)ueue a deployment for the environment under point\n\n"
