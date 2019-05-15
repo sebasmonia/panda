@@ -810,12 +810,14 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
   (let-alist deploy-status
     (list .environment.name
           (vector .environment.name
-                  .deploymentResult.lifeCycleState
-                  .deploymentResult.deploymentState
+                  (or .deploymentResult.lifeCycleState "")
+                  (or .deploymentResult.deploymentState "")
                   (panda--unixms-to-string .deploymentResult.startedDate)
                   (panda--unixms-to-string .deploymentResult.finishedDate)
-                  (format "%s" .deploymentResult.id)
-                  .deploymentResult.deploymentVersion.name))))
+                  (if .deploymentResult.id
+                      (format "%s" .deploymentResult.id)
+                    "")
+                  (or .deploymentResult.deploymentVersion.name "")))))
 
 (define-derived-mode panda--deploy-results-mode tabulated-list-mode "Panda deploy results view" "Major mode to display Bamboo's deploy results."
   (setq tabulated-list-format [("Environment" 35 nil)
