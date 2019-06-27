@@ -218,6 +218,7 @@ Artifacts:
       (setq url-to-get (concat url-to-get "&" params)))
     (panda--log "----- API call: " url-request-method "to "  url-to-get "with data" url-request-data " -----")
     (with-current-buffer (url-retrieve-synchronously url-to-get panda-silence-url nil panda-api-timeout)
+      (set-buffer-multibyte t)
       (when panda-log-responses
         (panda--log "API call response: " (buffer-string) "\n"))
       (goto-char url-http-end-of-headers)
