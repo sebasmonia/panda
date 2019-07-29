@@ -60,7 +60,7 @@ The keymap uses long sequences, but it's also quite mnemonic. Assuming you use t
 `C-c b q` (`q` =>  queue), then either `b` or `d` to queue a build or a deploy.
 
 In case you don't use the amazing [which-key package](https://melpa.org/#/which-key), `panda-map` prints a 
-message in the echo area which shows the available bindings.
+message in the echo area that shows the available bindings.
 
 The build and deploy status modes also have actions associated to them. Use `?` to open a help buffer
 with the list of bindings available.

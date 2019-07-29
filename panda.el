@@ -161,7 +161,7 @@ Artifacts:
     (define-key queue-map (kbd "b") `("build" . panda-queue-build))
 
     (define-key status-map (kbd "e") `("environment" . panda-environment-history))
-    (define-key status-map (kbd "d") `("deployments" . panda-queue-status))
+    (define-key status-map (kbd "d") `("deployments" . panda-deploy-status))
     (define-key status-map (kbd "b") `("builds" . panda-build-results))
 
     (define-key main-map (kbd "r") '("refresh cache" . panda-refresh-cache))
