@@ -53,13 +53,16 @@ There's a keymay provided for convenience:
     (global-set-key (kbd "C-c b") 'panda-map) ;; b for "Bamboo"
 ```
 
-The keymap uses long sequences, but it's also quite mnemonic.
+The keymap uses long sequences, but it's also quite mnemonic. Assuming you use the binding suggested above:
 
 `C-c b s` (`s` => status), then either `b`, `d` or `e` for build, deploy or environment status, respectively.
 
 `C-c b q` (`q` =>  queue), then either `b` or `d` to queue a build or a deploy.
 
-The build and deploy status buffers also have actions associated to them. Use `?` to open a help buffer
+In case you don't use the amazing [which-key package](https://melpa.org/#/which-key), `panda-map` prints a 
+message in the echo area which shows the available bindings.
+
+The build and deploy status modes also have actions associated to them. Use `?` to open a help buffer
 with the list of bindings available.
 
 # Manual

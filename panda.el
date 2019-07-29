@@ -152,19 +152,24 @@ Artifacts:
 
 (defvar-local panda--deploy-project-id nil "Used in `panda--deploy-results-mode` to store the current deployment project ID.")
 
-(define-prefix-command 'panda-map)
-;; Queue commands
-(define-key panda-map (kbd "q b") 'panda-queue-build)
-(define-key panda-map (kbd "q d") 'panda-queue-deploy)
-;; Status commands
-(define-key panda-map (kbd "s b") 'panda-build-results)
-(define-key panda-map (kbd "s d") 'panda-deploy-status)
-(define-key panda-map (kbd "s e") 'panda-environment-history)
 
-;; Create
-(define-key panda-map (kbd "c") 'panda-create-release)
-;; Refresh
-(define-key panda-map (kbd "r") 'panda-refresh-cache)
+(defvar panda-map
+  (let ((main-map (make-sparse-keymap "Bamboo operations"))
+        (queue-map (define-prefix-command 'queue nil "Queue new"))
+        (status-map (define-prefix-command 'status nil "Status of")))
+    (define-key queue-map (kbd "d") `("deploy" . panda-queue-deploy))
+    (define-key queue-map (kbd "b") `("build" . panda-queue-build))
+
+    (define-key status-map (kbd "e") `("environment" . panda-environment-history))
+    (define-key status-map (kbd "d") `("deployments" . panda-queue-status))
+    (define-key status-map (kbd "b") `("builds" . panda-build-results))
+
+    (define-key main-map (kbd "r") '("refresh cache" . panda-refresh-cache))
+    (define-key main-map (kbd "c") '("create release" . panda-create-release))
+    (define-key main-map (kbd "q") `("queue..." . ,queue-map))
+    (define-key main-map (kbd "s") `("status..." . ,status-map))
+    main-map))
+
 ; Interactive commands not mapped:
 ;; panda-clear-credentials
 
@@ -265,7 +270,7 @@ Artifacts:
 
 (defun panda--refresh-cache-builds ()
   "Refresh the cache of projects and plans."
-  (panda--message "Refreshing Bamboo build project and plan cache...")
+  (panda--message "Refreshing Bamboo build projects cache...")
   ;; If you have more than 10000 projects I doubt you are using this package
   (let* ((response (panda--api-call "/project" "expand=projects.project.plans&max-results=10000"))
          ;; convert vector to list
@@ -356,23 +361,23 @@ Artifacts:
 ;;------------------Common UI utilities-------------------------------------------
 
 (defun panda--select-build-project ()
-  "Run 'ido-completing-read' to select a project.  Return the project key."
+  "Run 'completing-read' to select a project.  Return the project key."
   (let* ((projects (panda--projects))
-         (selected (ido-completing-read "Select project: "
+         (selected (completing-read "Select project: "
                                         (mapcar 'first projects))))
     (panda--agetstr selected projects)))
 
 (defun panda--select-build-plan (project-key)
-  "Run 'ido-completing-read' to select a plan under PROJECT-KEY.  Return the plan key."
+  "Run 'completing-read' to select a plan under PROJECT-KEY.  Return the plan key."
   (let* ((plans (panda--plans project-key))
-         (selected (ido-completing-read "Select plan: "
+         (selected (completing-read "Select plan: "
                                         (mapcar 'first plans))))
     (panda--agetstr selected plans)))
 
 (defun panda--select-build-branch (plan-key)
-  "Run 'ido-completing-read' to select a plan under PLAN-KEY  Return the branch key."
+  "Run 'completing-read' to select a plan under PLAN-KEY  Return the branch key."
   (let* ((branches (panda--branches plan-key))
-         (selected (ido-completing-read "Select branch: "
+         (selected (completing-read "Select branch: "
                                         (mapcar 'first branches))))
     (panda--agetstr selected branches)))
 
@@ -388,9 +393,9 @@ If provided PROJECT and PLAN won't be prompted."
     (list project-key plan-key branch-key)))
 
 (defun panda--select-deploy-project ()
-  "Run 'ido-completing-read' to select a deploy project.  Return the project data."
+  "Run 'completing-read' to select a deploy project.  Return the project data."
   (let* ((deploy-names (mapcar 'car (panda--deploys)))
-         (selected (ido-completing-read "Select deploy project: " deploy-names)))
+         (selected (completing-read "Select deploy project: " deploy-names)))
     selected))
 
 (defun panda--unixms-to-string (unix-milliseconds)
@@ -613,7 +618,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
     ;; call and be done with it
     (let* ((did (panda--get-deployid-for-plan-key plan-key))
            (formatted (panda--successful-builds-for-release branch-key))
-           (selected-build (ido-completing-read "Select a build: " formatted))
+           (selected-build (completing-read "Select a build: " formatted))
            (release-name nil))
       (setq selected-build (car (split-string selected-build))) ;; really shady
       (setq release-name (read-string "Release name: " (panda--proposed-release-name did selected-build)))
@@ -667,10 +672,10 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
          (did (car metadata))
          (environments (cdr metadata))
          (deploy-data (panda--deploys-for-id did))
-         (selected-release (ido-completing-read "Select release: "
+         (selected-release (completing-read "Select release: "
                                                 (mapcar 'first deploy-data)))
          (selected-environment (or environment
-                                   (ido-completing-read "Select an environment: "
+                                   (completing-read "Select an environment: "
                                                     (mapcar 'first environments))))
          (confirmed t)) ;; we'll check if there's a regex match later
     (when (not (string-empty-p panda-deploy-confirmation-regex))
@@ -737,7 +742,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
   (unless env-id
     (let* ((project (panda--select-deploy-project))
            (project-data (panda--agetstr project (panda--deploys)))
-           (env-name (ido-completing-read "Select an environment: "
+           (env-name (completing-read "Select an environment: "
                                       (mapcar 'car (cdr project-data)))))
       (setq env-id (panda--env-id-from-name env-name))))
   (let* ((environment-data (panda--api-call (format "/deploy/environment/%s/results" env-id)))
