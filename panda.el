@@ -119,7 +119,8 @@ If yes, automatically open it.  No to never ask.  Set to 'ask (default) to be pr
     (builds . "Builds %s")
     (deploys . "Environments %s")
     (env-history . "Env. History %s")
-    (deploy-log . "Deploy log %s"))
+    (deploy-log . "Deploy log %s")
+    (build-log . "Build log %s"))
   "Templates for the different Panda buffer names.")
 
 (defvar panda--build-buffer-template "
@@ -483,6 +484,53 @@ If provided PROJECT and PLAN won't be prompted."
       (setq plan-key (panda--agetstr branch-name (panda--branches plan-key))))
     (panda--api-call (concat "/result/" plan-key "-" build-number))))
 
+(defun panda-display-build-logs (build-key)
+  "Show a buffer with the logs for the jobs of BUILD-KEY.  Invoked from build status list."
+  ;; there is a better way to replace the last part of the build key using a regex
+  ;; but I couldn't crack it :(
+  (let* ((key-components (split-string build-key "-"))
+         (plan-key (apply 'format "%s-%s" (butlast key-components)))
+         (build-number (car (last key-components)))
+         (plan-jobs (panda--job-keys-names-for-plan plan-key))
+         (buffer-name (format (panda--get-buffer-name 'build-log) build-key))
+         (buffer (get-buffer-create buffer-name)))
+    (panda--log (prin1-to-string plan-jobs))
+    (with-current-buffer buffer
+      (setq buffer-read-only nil)
+      (erase-buffer)
+      (dolist (j plan-jobs)
+        (push-mark (point) t nil) ;; This is so that each header has a local mark
+        (insert (format "Logs for job \"%s\" (%s):\n\n" (cdr j) (car j)))
+        (insert (panda--build-log-from-build-job-data
+                 (panda--api-call (format "/result/%s-%s" (car j) build-number)
+                                  "expand=logEntries&max-results=1000000")))
+        (insert "\n\n"))
+      (setq buffer-read-only t)
+      (local-set-key "g" (lambda ()
+                           (interactive)
+                           (panda-display-build-logs build-key)))
+      (panda--message (format "Showing log for the jobs of build %s. Press g to refresh." build-key))
+      (switch-to-buffer buffer))))
+
+(defun panda--job-keys-names-for-plan (plan-key)
+  "Get the job keys for PLAN-KEY."
+  (cl-flet* ((get-id-name (job-data)
+                          (let-alist job-data
+                            (cons .searchEntity.key .searchEntity.jobName)))
+              (get-jobs-list (jobs)
+                             (mapcar #'get-id-name jobs)))
+    (let ((jobs (alist-get 'searchResults (panda--api-call (format "/search/jobs/%s" plan-key)))))
+      (get-jobs-list jobs))))
+
+(defun panda--build-log-from-build-job-data (build-job-data)
+  "Extract the log entries from BUILD-JOB-DATA."
+  ;; TODO merge this and the function that does the same for deploy logs. They are identical!
+  (let-alist build-job-data
+    (mapconcat (lambda (log-entry) (format "[%s] - %s"
+                                           (alist-get 'formattedDate log-entry)
+                                           (alist-get 'unstyledLog log-entry)))
+               .logEntries.logEntry "\n")))
+
 (defun panda-queue-build (&optional plan)
   "Queue a build.  If PLAN is not provided, select it interactively."
   (interactive)
@@ -566,6 +614,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
 
 (define-key panda--build-results-mode-map (kbd "g") 'panda--build-results-refresh)
 (define-key panda--build-results-mode-map (kbd "d") 'panda--build-results-info)
+(define-key panda--build-results-mode-map (kbd "l") 'panda--build-results-log)
 (define-key panda--build-results-mode-map (kbd "b") 'panda--build-results-browse)
 (define-key panda--build-results-mode-map (kbd "c") 'panda--build-results-create)
 (define-key panda--build-results-mode-map (kbd "?") 'panda--build-results-help)
@@ -581,6 +630,11 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
   "Show build info in a `panda--build-results-mode' buffer."
   (interactive)
   (panda-display-build-info (tabulated-list-get-id)))
+
+(defun panda--build-results-log ()
+  "Show build logs in a `panda--build-results-mode' buffer."
+  (interactive)
+  (panda-display-build-logs (tabulated-list-get-id)))
 
 (defun panda--build-results-browse ()
   "Brose a build from a `panda--build-results-mode' buffer."
@@ -603,6 +657,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
          "Bindings:\n\n"
          "* g will refresh the data, as usual in Emacs\n\n"
          "* d shows the (d)etails for the build under point in a new buffer\n\n"
+         "* l shows the (l)ogs for the jobs of the build under point in a new buffer\n\n"
          "* b uses `panda-browser-url' to open Bamboo in your default (b)rowser to see build details\n\n"
          "* c to (c)reate a new release out of the build at point\n\n ")))
     (panda--show-help help-message)))
