@@ -284,11 +284,15 @@ Artifacts:
     (dolist (proj data)
       (let-alist proj
         (setq project (cons .name .key))
-        (setq plans (mapcar (lambda (a-plan) (let-alist a-plan (cons .name .key)))
+        (setq plans (mapcar #'panda--format-plan-cache
                             .plans.plan))
         (push project panda--projects-cache)
         (push (cons (cdr project) plans) panda--plans-cache)))
     (panda--message "Build cache updated!")))
+
+(defun panda--format-plan-cache (pl-data)
+  "Format PL-DATA for the project cache."
+  (let-alist pl-data (cons .name .key)))
 
 (defun panda--refresh-cache-deploys ()
   "Refresh the cache of deploys."
@@ -340,13 +344,18 @@ Artifacts:
              (formatted nil))
         (let-alist data
           (setq formatted
-                (mapcar (lambda (br) (let-alist br (cons .shortName .key)))
+                (mapcar #'panda--format-branch-cache
                         .branches.branch)))
         (push (cons panda--base-plan plan-key) formatted) ;; adding master plan
         (push (cons plan-key formatted) panda--branches-cache)
         (setq in-cache formatted)
         (panda--message "Caching branches for plan...")))
     in-cache))
+
+(defun panda--format-branch-cache (br-data)
+  "Format BR-DATA for the project cache."
+  (let-alist br-data
+    (cons .shortName .key)))
 
 (defun panda--deploys ()
   "Get cached list of deploy projects, fetch them if needed."
@@ -900,7 +909,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                   (or .deploymentResult.deploymentVersion.name "")))))
 
 (define-derived-mode panda--deploy-results-mode tabulated-list-mode "Panda deploy results view" "Major mode to display Bamboo's deploy results."
-  (setq tabulated-list-format [("Environment" 35 nil)
+  (setq tabulated-list-format [("Environment" 45 nil)
                                ("State" 12 nil)
                                ("Status" 8)
                                ("Started" 20 nil)
