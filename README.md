@@ -3,6 +3,12 @@
 # panda
 Emacs package that consumes Bamboo's REST API to do useful things.
 
+## Breaking change
+
+For [issue #23](https://github.com/sebasmonia/panda/issues/23), now the environments list uses
+`d` to queue a deployment instead of `q`. Now `q` has the standard behaviour of closing the 
+tabulated list.
+
 ## Table of contents
 
 <!--ts-->

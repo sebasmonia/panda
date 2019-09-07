@@ -518,7 +518,10 @@ If provided PROJECT and PLAN won't be prompted."
       (local-set-key "g" (lambda ()
                            (interactive)
                            (panda-display-build-logs build-key)))
-      (panda--message (format "Showing log for the jobs of build %s. Press g to refresh." build-key))
+      (local-set-key "q" (lambda ()
+                           (interactive)
+                           (kill-buffer)))
+      (panda--message (format "Showing log for the jobs of build %s. Press g to refresh, q to close the buffer." build-key))
       (switch-to-buffer buffer))))
 
 (defun panda--job-keys-names-for-plan (plan-key)
@@ -845,7 +848,10 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
       (local-set-key "g" (lambda ()
                            (interactive)
                            (panda--deploy-log deploy-id)))
-      (panda--message (format "Showing log for deploy %s. Press g to refresh." deploy-id))
+      (local-set-key "q" (lambda ()
+                           (interactive)
+                           (kill-buffer)))
+      (panda--message (format "Showing log for deploy %s. Press g to refresh, q to close the buffer." deploy-id))
       (switch-to-buffer buffer))))
 
 (defun panda--deploy-log-from-deploy-data (deploy-data)
@@ -920,7 +926,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
   (tabulated-list-init-header))
 
 (define-key panda--deploy-results-mode-map (kbd "g") 'panda--deploy-results-refresh)
-(define-key panda--deploy-results-mode-map (kbd "q") 'panda--deploy-results-queue)
+(define-key panda--deploy-results-mode-map (kbd "d") 'panda--deploy-results-queue)
 (define-key panda--deploy-results-mode-map (kbd "b") 'panda--deploy-results-browse)
 (define-key panda--deploy-results-mode-map (kbd "h") 'panda--deploy-results-history)
 (define-key panda--deploy-results-mode-map (kbd "l") 'panda--deploy-results-log)
@@ -935,7 +941,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
          "In this list you have one entry per environment for a given deployment project.\n\n"
          "Bindings:\n\n"
          "* g will refresh the data, as usual in Emacs\n\n"
-         "* q opens a list of releases to (q)ueue a deployment for the environment under point\n\n"
+         "* d opens a list of releases to queue a (d)eployment for the environment under point\n\n"
          "* b uses `panda-browser-url' to open Bamboo in your default (b)rowser to see environment details\n\n"
          "* l will open the (l)og for the last deployment of the environment at point\n\n"
          "* h opens the selected environment's (h)istory in a new buffer\n\n ")))
