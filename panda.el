@@ -374,21 +374,21 @@ Artifacts:
   "Run 'completing-read' to select a project.  Return the project key."
   (let* ((projects (panda--projects))
          (selected (completing-read "Select project: "
-                                        (mapcar 'first projects))))
+                                        (mapcar 'cl-first projects))))
     (panda--agetstr selected projects)))
 
 (defun panda--select-build-plan (project-key)
   "Run 'completing-read' to select a plan under PROJECT-KEY.  Return the plan key."
   (let* ((plans (panda--plans project-key))
          (selected (completing-read "Select plan: "
-                                        (mapcar 'first plans))))
+                                        (mapcar 'cl-first plans))))
     (panda--agetstr selected plans)))
 
 (defun panda--select-build-branch (plan-key)
   "Run 'completing-read' to select a plan under PLAN-KEY  Return the branch key."
   (let* ((branches (panda--branches plan-key))
          (selected (completing-read "Select branch: "
-                                        (mapcar 'first branches))))
+                                        (mapcar 'cl-first branches))))
     (panda--agetstr selected branches)))
 
 (defun panda--select-build-ppb (&optional project plan)
@@ -546,7 +546,7 @@ If provided PROJECT and PLAN won't be prompted."
 (defun panda-queue-build (&optional plan)
   "Queue a build.  If PLAN is not provided, select it interactively."
   (interactive)
-  (destructuring-bind (_project-key plan-key branch-key) (panda--select-build-ppb nil plan)
+  (cl-destructuring-bind (_project-key plan-key branch-key) (panda--select-build-ppb nil plan)
     (when (equal branch-key (concat plan-key "0"))
       ;; the base plan has a branch number of 0 but
       ;; won't build if using the prefix num
@@ -564,7 +564,7 @@ If provided PROJECT and PLAN won't be prompted."
 If PLAN is not provided, select it interactively.
 The amount of builds to retrieve is controlled by 'panda-latest-max'."
   (interactive)
-  (destructuring-bind (_project-key _plan-key branch-key) (panda--select-build-ppb nil plan)
+  (cl-destructuring-bind (_project-key _plan-key branch-key) (panda--select-build-ppb nil plan)
     (panda-build-results-branch branch-key)))
 
 (defun panda-build-results-branch (branch)
@@ -679,7 +679,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
 (defun panda-create-release ()
   "Create a new release from a succesful build."
   (interactive)
-  (destructuring-bind (_project-key plan-key branch-key) (panda--select-build-ppb nil nil)
+  (cl-destructuring-bind (_project-key plan-key branch-key) (panda--select-build-ppb nil nil)
     ;; I could re-work the cache to skip this call if I stored the plan key. But some
     ;; deploys dont have them, so I have to code for that too...let's have one extra
     ;; call and be done with it
@@ -740,10 +740,10 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
          (environments (cdr metadata))
          (deploy-data (panda--deploys-for-id did))
          (selected-release (completing-read "Select release: "
-                                                (mapcar 'first deploy-data)))
+                                                (mapcar 'cl-first deploy-data)))
          (selected-environment (or environment
                                    (completing-read "Select an environment: "
-                                                    (mapcar 'first environments))))
+                                                    (mapcar 'cl-first environments))))
          (confirmed t)) ;; we'll check if there's a regex match later
     (when (not (string-empty-p panda-deploy-confirmation-regex))
       (if (string-match-p panda-deploy-confirmation-regex selected-environment)
