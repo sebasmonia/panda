@@ -973,8 +973,5 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
   (interactive)
   (panda--deploy-log (elt (tabulated-list-get-entry) 5)))
 
-;; panda-deploy-from-build
-;; find if a build has a deploy: https://bamboo.starz.com/rest/api/latest/search/versions?searchTerm=build-name&deploymentProjectId=did
-
 (provide 'panda)
 ;;; panda.el ends here
