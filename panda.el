@@ -34,6 +34,7 @@
 (require 'cl-lib)
 (require 'url)
 (require 'browse-url)
+(require 'subr-x)
 
 (defgroup panda nil
   "Client for Bamboo's REST API."
