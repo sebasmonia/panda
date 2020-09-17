@@ -9,6 +9,8 @@ For [issue #23](https://github.com/sebasmonia/panda/issues/23), now the environm
 `d` to queue a deployment instead of `q`. Now `q` has the standard behaviour of closing the 
 tabulated list.
 
+**You can buy me a [cup of ko-fi](https://ko-fi.com/A0A527CN7)! There's also a [PayPal option](https://www.paypal.me/sebasmonia).**
+
 ## Table of contents
 
 <!--ts-->
