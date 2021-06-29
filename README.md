@@ -26,7 +26,7 @@ tabulated list.
 
 ## Installation and configuration
 
-Place panda.el in your load-path.  Or install from MELPA (preferred).
+Place the Panda files in your load-path.  Or install from MELPA (preferred).
 
 The next step would be to use customize for panda. Options are documented, below some of them:
 
