@@ -1,0 +1,83 @@
+projects--cache
+
+a list of (project names . project key)
+( ....
+ ("Nodify" . "NOD")
+ ("Moon Unit Alpha" . "MUA")
+ ("Mini Apps" . "MINIAPPS")
+ ("Midnight Express" . "MID")
+ ("Metadata Ingest" . "MDI")
+ ("Metadata DR" . "MDDR")
+ ("Metadata" . "METADATA")
+ ("MediaForge3" . "MF3")
+...)
+
+panda--plans-cache
+a list of lists (project key (plan name - plan key) 
+
+ ("MINIAPPS"
+  ("Mini Apps - Archived.Register" . "MINIAPPS-REGISTER")
+  ("Mini Apps - Archived.Test Raffle" . "MINIAPPS-TESTRAFFLE"))
+ ("MID"
+  ("Midnight Express - DeviceFarmReports" . "MID-DEV")
+  ("Midnight Express - Farrier" . "MID-FAR")
+  ("Midnight Express - FarrierIntTest" . "MID-FARINT")
+  ("Midnight Express - Microservices Catalog" . "MID-MICROCATALOG")
+  ("Midnight Express - Microservices Common" . "MID-MICROCOMMON")
+  ("Midnight Express - Microservices Template" . "MID-MICRO")
+  ("Midnight Express - MidnightExpress Integration Test - API" . "MID-MITC")
+  ("Midnight Express - MidnightExpress integration tests" . "MID-MIT")
+  ("Midnight Express - MidnightExpress Keyserver" . "MID-MID")
+  ("Midnight Express - MidnightExpressPlayReadyFargate" . "MID-MEPRFARGATE")
+  ("Midnight Express - MUA Auth Server" . "MID-MUAAUT")
+  ("Midnight Express - Piper" . "MID-PIPER")
+  ("Midnight Express - slacksite" . "MID-SLACK")
+  ("Midnight Express - VideoPackagerLambda" . "MID-VID"))
+ ("MDI"
+  ("Metadata Ingest - mdi-batch-job" . "MDI-MBATCHJ")...
+
+panda--branches-cache is a variable defined in ‘panda.el’.
+
+in this case it only had the keys for the midnight express plan
+
+Its value is
+((#1="MID-MID"
+     ("[Master plan]" . #1#)
+     ("feature-ME-683_SecureMDS" . "MID-MID123")
+     ("hotfix-1.1.1" . "MID-MID33")))
+
+Caches the branches for each plan, as they are requested.
+
+
+
+
+
+
+
+
+
+
+
+deploy--cache:
+
+A list of lists... (Deploy Plan Name - Project ID (list of environment names - id))
+
+ ("Midnight Express KeyServer" 217677825
+  ("AWS13 Prod - KeyServer - Blue - us-west-2" 250019879)
+  ("AWS13 Prod - KeyServer - Blue - us-east-1" 250019878)
+  ("AWS13 Prod – KeyServer – Blue – GLOBAL" 250019877)
+  ("AWS05 QA - KeyServer - Blue - us-west-2" 250019861)
+  ("AWS05 QA - KeyServer - Blue - us-east-1" 250019860)
+  ("AWS05 QA – KeyServer – Blue – GLOBAL" 250019859)
+  ("AWS02 DEV - KeyServer - Blue - us-west-2" 250019849)
+  ("AWS02 DEV - KeyServer - Blue - us-east-1" 250019848)
+  ("AWS02 DEV – KeyServer – Blue – GLOBAL" 246612196))
+ ("Midnight Express Microservices Catalog" 300220417
+  ("AWS13 us-west-2 - Microservices catalog" 300285958)
+  ("AWS13 us-east-1 - Microservices catalog" 300285957)
+  ("AWS05 us-west-2 - Microservices catalog" 300285956)
+  ("AWS05 us-east-1 - Microservices catalog" 300285955)
+  ("AWS02 us-west-2 - Microservices catalog" 300285954)
+  ("AWS02 us-east-1 - Microservices catalog" 300285953))
+
+  

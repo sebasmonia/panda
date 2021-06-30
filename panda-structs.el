@@ -22,6 +22,21 @@
 
 ;;; Code:
 
+(require 'cl-lib)
+
+
+(cl-defstruct (panda--project (:constructor panda--make-project))
+  project-key project-name plan-list)
+
+
+(cl-defstruct (panda--plan (:constructor panda--make-plan))
+  project-key project-name branches)
+
+(cl-defstruct (panda--plan-branch (:constructor panda--make-plan-branch))
+  branch-key branch-name)
+
+
+(panda--api-call "/project" "expand=projects.project.plans&max-results=10000")
 
 
 (provide 'panda-structs)

@@ -22,6 +22,12 @@
 
 ;;; Code:
 
+(require 'json)
+(require 'url)
+(require 'cl-lib)
+
+(defvar panda--auth-string nil "Caches the credentials for API calls.")
+
 ;;------------------HTTP Stuff----------------------------------------------------
 
 ;; maybe change parameters order? url, method, qs params, data?
@@ -39,6 +45,7 @@
         (url-to-get (concat panda-api-url api-url "?os_authType=basic"))
         (url-request-method (or method "GET"))
         (url-request-data (encode-coding-string data 'utf-8))
+        (json-object-type 'hash-table)
         (json-false :false))
     (when params
       (setq url-to-get (concat url-to-get "&" params)))
@@ -52,7 +59,9 @@
         (ignore-errors
           ;; if there's a problem parsing the JSON
           ;; data ==> 'error
-          (setq data (json-read)))
+          (if (fboundp 'json-parse-buffer)
+              (setq data (json-parse-buffer))
+            (setq data (json-read))))
         (kill-buffer) ;; don't litter with API buffers
         data))))
 
