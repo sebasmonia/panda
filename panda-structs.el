@@ -88,19 +88,17 @@ Environments without \"allowedToExecute\" permissions are removed."
 
 ;;------------------"Accessors" of sorts to the cached data-----------------------
 
-(defun panda--projects ()
-  "Get cached list of projects, fetch them if needed."
-  (unless panda--projects-cache
-    (panda--refresh-cache-builds))
-  (cl-loop for project in panda--builds-cache
-           collect (panda--project-name project)))
-
-(defun panda--projects ()
-  "Get cached list of projects, fetch them if needed."
+(defun panda--select-build-project ()
+  "Call `completing-read' for a project, return the key of the one selected."
   (unless panda--builds-cache
     (panda--refresh-cache-builds))
-  (cl-loop for project in panda--builds-cache
-           collect (panda--project-name project)))
+  (let* ((project-names-keys (cl-loop for project in panda--builds-cache
+                                      collect (cons (panda--project-name project)
+                                                    (panda--project-key project))))
+         (name-selected (completing-read "Select project: " project-names-keys)))
+    (alist-get name-selected project-names-keys nil nil 'equal)))
+
+
 
 (defun panda--plans (project-key)
   "Get cached list of plans for a PROJECT-KEY, fetch plans if needed."
@@ -114,10 +112,28 @@ Environments without \"allowedToExecute\" permissions are removed."
            when (string= project-key (panda--project-key project))
            do (cl-return-from find-plans (panda--project-plans project))))
 
+(defun panda--plan (plan-key)
+  "Get cached list of plans for a PROJECT-KEY, fetch plans if needed."
+  (unless panda--builds-cache
+    (panda--refresh-cache-builds))
+  ;; this is probably the fanciest Lisp I wrote so far. See this entry in the CL cookbook:
+  ;; https://lispcookbook.github.io/cl-cookbook/iteration.html#named-loops-and-early-exit
+  ;; I like this better than manually going over the list on my own
+  (cl-loop named find-plans
+           for project in panda--builds-cache
+           when (string= project-key (panda--project-key project))
+           do (cl-return-from find-plans (panda--project-plans project))))
+
 (defun panda--branches (plan-key)
-  ;; TODO
+  (cl-destructuring-bind (project-key &rest plan) (split-string plan-key "-")
+    (let* ((plan (panda--plans project-key))
+           (plan (panda--project-plans project)
+    (message "Project: %s Plan: %s" project-key (string-join plan "-")))
+
   )
-  
+
+(panda--project-plans project)
+
 (provide 'panda-structs)
 
 ;;; panda-structs.el ends here
