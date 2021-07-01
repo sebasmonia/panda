@@ -102,6 +102,7 @@ If yes, automatically open it.  No to never ask.  Set to 'ask (default) to be pr
                  (const :tag "Ask" ask)))
 
 (defvar panda--auth-string nil "Caches the credentials for API calls.")
+(defvar panda--builds-cache nil "Caches all the projects and plans (and eventually branches) the user has access to.")
 (defvar panda--projects-cache nil "Caches all the build projects the user has access to, in one go.")
 (defvar panda--plans-cache nil "Caches the plans for each build project the user has access to, in one go.")
 (defvar panda--branches-cache nil "Caches the branches for each plan, as they are requested.")
@@ -222,62 +223,16 @@ Artifacts:
 (defun panda--refresh-cache-builds ()
   "Refresh the cache of projects and plans."
   (panda--message "Refreshing Bamboo build projects cache...")
-  ;; If you have more than 10000 projects I doubt you are using this package
-  (let* ((response (panda--api-call "/project" "expand=projects.project.plans&max-results=10000"))
-         ;; convert vector to list
-         (data (let-alist response (append .projects.project nil)))
-         (project nil)
-         (plans nil))
-    (setq panda--projects-cache nil)
-    (setq panda--plans-cache nil)
-    (setq panda--branches-cache nil)
-    (dolist (proj data)
-      (let-alist proj
-        (setq project (cons .name .key))
-        (setq plans (mapcar #'panda--format-plan-cache
-                            .plans.plan))
-        (push project panda--projects-cache)
-        (push (cons (cdr project) plans) panda--plans-cache)))
-    (panda--message "Build cache updated!")))
-
-(defun panda--format-plan-cache (pl-data)
-  "Format PL-DATA for the project cache."
-  (let-alist pl-data (cons .name .key)))
+  (setf panda--builds-cache
+        (panda--convert-project-response
+         ;; If you have more than 10000 projects I doubt you are using this package
+         (panda--api-call "/project" "expand=projects.project.plans&max-results=10000"))))
 
 (defun panda--refresh-cache-deploys ()
   "Refresh the cache of deploys."
   (panda--message "Refreshing Bamboo deployment cache...")
-  (let* ((data (panda--api-call "/deploy/project/all"))
-         (formatted (mapcar 'panda--format-deploy-entry data)))
-    (setq panda--deploys-cache (cl-remove-if-not
-                                ;; keep only the ones I can deploy to
-                                ;; and have a valid plan
-                                (lambda (deploy) (and (cddr deploy)
-                                                      (car deploy)))
-                                formatted)))
-  (panda--message "Deploy cache updated!"))
-
-(defun panda--format-deploy-entry (deploy-project)
-  "Convert a DEPLOY-PROJECT to the cache format."
-  (let-alist deploy-project
-    (cons .name
-          (cons .id
-                (panda--format-environments-entry .environments)))))
-
-(defun panda--format-environments-entry (deploy-envs)
-  "Convert DEPLOY-ENVS to the cache format, only for allowedToExecute environments."
-  (let ((as-list (append deploy-envs nil))
-        (valid-envs nil))
-    (dolist (environment as-list valid-envs)
-      (let-alist environment
-        (when .operations.allowedToExecute
-          (push (list .name .id) valid-envs))))))
-
-(defun panda--projects ()
-  "Get cached list of projects, fetch them if needed."
-  (unless panda--projects-cache
-    (panda-refresh-cache))
-  panda--projects-cache)
+  (setf panda--deploys-cache (panda--convert-deploy-response
+                              (panda--api-call "/deploy/project/all"))))
 
 (defun panda--plans (project-key)
   "Get cached list of plans for a PROJECT-KEY, fetch plans if needed."

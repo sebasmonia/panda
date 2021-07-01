@@ -24,20 +24,100 @@
 
 (require 'cl-lib)
 
+;;------------------Struct definitions--------------------------------------------
 
 (cl-defstruct (panda--project (:constructor panda--make-project))
-  project-key project-name plan-list)
+  key name plans)
 
 
 (cl-defstruct (panda--plan (:constructor panda--make-plan))
-  project-key project-name branches)
+  key name branches)
 
 (cl-defstruct (panda--plan-branch (:constructor panda--make-plan-branch))
-  branch-key branch-name)
+  key name)
 
+(cl-defstruct (panda--deploy-project (:constructor panda--make-deploy-project))
+  id name build-plan-key environments)
 
-(panda--api-call "/project" "expand=projects.project.plans&max-results=10000")
+(cl-defstruct (panda--environment (:constructor panda--make-environment))
+  id name)
 
+;;------------------Conversion of parsed JSON to Panda structs--------------------
 
+(defun panda--gethash (keys ht)
+  "Convenience function to call `gethash' starting on HT for each element on KEYS.
+KEYS can be a list of symbols, or strings. The former are converted to the latter.
+There's a tendency in the Bamboo responses to nest data in JSON objects..."
+  (when (symbolp (car keys))
+    ;; convert symbols to strings
+    (setf keys (mapcar #'symbol-name keys)))
+  (dolist (a-key keys ht)
+    (when ht ;; silently return nil. LIVIN' ON THE EDGE
+      (setf ht (gethash a-key ht)))))
+
+(defun panda--convert-project-response (api-response)
+  "Convert API-RESPONSE, a vector of hashtables from parsed JSON, to Panda build structures."
+  (cl-loop for project across (panda--gethash '(projects project) api-response)
+           collect (panda--process-project project)))
+
+(defun panda--process-project (project)
+  "Convert a PROJECT (a hashtable from parsed JSON) to a project->plans structure."
+  (let ((plans (cl-loop for plan across (panda--gethash '(plans plan) project)
+                        collect (panda--make-plan :key (gethash "key" plan)
+                                                  :name (gethash "name" plan)))))
+    (panda--make-project :key (gethash "key" project)
+                         :name (gethash "name" project)
+                         :plans plans)))
+
+(defun panda--convert-deploy-response (api-response)
+  "Convert API-RESPONSE, a vector of hashtables from parsed JSON, to Panda deploy structures."
+  (cl-loop for deploy-project across api-response
+           collect (panda--make-deploy-project :id (gethash "id" deploy-project)
+                                               :name (gethash "name" deploy-project)
+                                               :build-plan-key (panda--gethash '(planKey key) deploy-project)
+                                               :environments (panda--process-environments
+                                                              (gethash "environments" deploy-project)))))
+
+(defun panda--process-environments (environments)
+  "Convert ENVIRONMENTS (a vector from parsed JSON) to Panda environments structures.
+Environments without \"allowedToExecute\" permissions are removed."
+  (cl-loop for env across environments
+           if (not (eq :false (panda--gethash '(operations allowedToExecute) env)))
+           collect (panda--make-environment :id (gethash "id" env)
+                                            :name (gethash "name" env))))
+
+;;------------------"Accessors" of sorts to the cached data-----------------------
+
+(defun panda--projects ()
+  "Get cached list of projects, fetch them if needed."
+  (unless panda--projects-cache
+    (panda--refresh-cache-builds))
+  (cl-loop for project in panda--builds-cache
+           collect (panda--project-name project)))
+
+(defun panda--projects ()
+  "Get cached list of projects, fetch them if needed."
+  (unless panda--builds-cache
+    (panda--refresh-cache-builds))
+  (cl-loop for project in panda--builds-cache
+           collect (panda--project-name project)))
+
+(defun panda--plans (project-key)
+  "Get cached list of plans for a PROJECT-KEY, fetch plans if needed."
+  (unless panda--builds-cache
+    (panda--refresh-cache-builds))
+  ;; this is probably the fanciest Lisp I wrote so far. See this entry in the CL cookbook:
+  ;; https://lispcookbook.github.io/cl-cookbook/iteration.html#named-loops-and-early-exit
+  ;; I like this better than manually going over the list on my own
+  (cl-loop named find-plans
+           for project in panda--builds-cache
+           when (string= project-key (panda--project-key project))
+           do (cl-return-from find-plans (panda--project-plans project))))
+
+(defun panda--branches (plan-key)
+  ;; TODO
+  )
+  
 (provide 'panda-structs)
+
 ;;; panda-structs.el ends here
