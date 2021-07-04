@@ -34,6 +34,7 @@
 (require 'cl-lib)
 (require 'url)
 (require 'browse-url)
+(require 'seq)
 (require 'subr-x)
 (require 'panda-api)
 (require 'panda-structs)
@@ -228,34 +229,21 @@ Artifacts:
          ;; If you have more than 10000 projects I doubt you are using this package
          (panda--api-call "/project" "expand=projects.project.plans&max-results=10000"))))
 
+(defun panda--cache-branches (a-plan)
+  "Fetch the branches for A-PLAN for future use. Also return the cached branches."
+  (let ((branches-from-api (panda--convert-branches-response
+                            (panda--api-call (concat "/plan/" (panda--plan-key a-plan) "/branch")))))
+    (setf (panda--plan-branches a-plan)
+          ;; add master plan to the list of branches returned
+          (push (panda--make-branch :name panda--base-plan
+                                    :key (panda--plan-key a-plan))
+                branches-from-api))))
+
 (defun panda--refresh-cache-deploys ()
   "Refresh the cache of deploys."
   (panda--message "Refreshing Bamboo deployment cache...")
   (setf panda--deploys-cache (panda--convert-deploy-response
                               (panda--api-call "/deploy/project/all"))))
-
-(defun panda--plans (project-key)
-  "Get cached list of plans for a PROJECT-KEY, fetch plans if needed."
-  (unless panda--plans-cache
-    (panda-refresh-cache))
-  (panda--agetstr project-key panda--plans-cache))
-
-(defun panda--branches (plan-key)
-  "Get cached list of branches for a PLAN-KEY, fetch and cache if needed."
-  (let ((in-cache (panda--agetstr plan-key panda--branches-cache)))
-    (unless in-cache
-      (panda--message "Caching branches for plan...")
-      (let* ((data (panda--api-call (concat "/plan/" plan-key "/branch")))
-             (formatted nil))
-        (let-alist data
-          (setq formatted
-                (mapcar #'panda--format-branch-cache
-                        .branches.branch)))
-        (push (cons panda--base-plan plan-key) formatted) ;; adding master plan
-        (push (cons plan-key formatted) panda--branches-cache)
-        (setq in-cache formatted)
-        (panda--message "Caching branches for plan...")))
-    in-cache))
 
 (defun panda--format-branch-cache (br-data)
   "Format BR-DATA for the project cache."
@@ -274,38 +262,6 @@ Artifacts:
                          (panda--deploys))))
 
 ;;------------------Common UI utilities-------------------------------------------
-
-(defun panda--select-build-project ()
-  "Run 'completing-read' to select a project.  Return the project key."
-  (let* ((projects (panda--projects))
-         (selected (completing-read "Select project: "
-                                        (mapcar 'cl-first projects))))
-    (panda--agetstr selected projects)))
-
-(defun panda--select-build-plan (project-key)
-  "Run 'completing-read' to select a plan under PROJECT-KEY.  Return the plan key."
-  (let* ((plans (panda--plans project-key))
-         (selected (completing-read "Select plan: "
-                                        (mapcar 'cl-first plans))))
-    (panda--agetstr selected plans)))
-
-(defun panda--select-build-branch (plan-key)
-  "Run 'completing-read' to select a plan under PLAN-KEY  Return the branch key."
-  (let* ((branches (panda--branches plan-key))
-         (selected (completing-read "Select branch: "
-                                        (mapcar 'cl-first branches))))
-    (panda--agetstr selected branches)))
-
-(defun panda--select-build-ppb (&optional project plan)
-  "Select the project, plan and branch for a build and return the keys.
-If provided PROJECT and PLAN won't be prompted."
-  ;; if the plan is provided skip the project when not set
-  (when (and (not project) plan)
-    (setq project "--"))
-  (let* ((project-key (or project (panda--select-build-project)))
-         (plan-key (or plan (panda--select-build-plan project-key)))
-         (branch-key (panda--select-build-branch plan-key)))
-    (list project-key plan-key branch-key)))
 
 (defun panda--select-deploy-project ()
   "Run 'completing-read' to select a deploy project.  Return the project data."

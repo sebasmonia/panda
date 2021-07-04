@@ -33,7 +33,7 @@
 (cl-defstruct (panda--plan (:constructor panda--make-plan))
   key name branches)
 
-(cl-defstruct (panda--plan-branch (:constructor panda--make-plan-branch))
+(cl-defstruct (panda--branch (:constructor panda--make-branch))
   key name)
 
 (cl-defstruct (panda--deploy-project (:constructor panda--make-deploy-project))
@@ -69,6 +69,12 @@ There's a tendency in the Bamboo responses to nest data in JSON objects..."
                          :name (gethash "name" project)
                          :plans plans)))
 
+(defun panda--convert-branches-response (api-response)
+  "Convert API-RESPONSE, a vector of hashtables from parsed JSON, to Panda build structures."
+  (cl-loop for branch across (panda--gethash '(branches branch) api-response)
+           collect (panda--make-branch :key (gethash "key" branch)
+                                       :name (gethash "shortName" branch))))
+
 (defun panda--convert-deploy-response (api-response)
   "Convert API-RESPONSE, a vector of hashtables from parsed JSON, to Panda deploy structures."
   (cl-loop for deploy-project across api-response
@@ -89,50 +95,67 @@ Environments without \"allowedToExecute\" permissions are removed."
 ;;------------------"Accessors" of sorts to the cached data-----------------------
 
 (defun panda--select-build-project ()
-  "Call `completing-read' for a project, return the key of the one selected."
+  "Call `completing-read' for a project, return the `panda--project' selected."
   (unless panda--builds-cache
     (panda--refresh-cache-builds))
-  (let* ((project-names-keys (cl-loop for project in panda--builds-cache
-                                      collect (cons (panda--project-name project)
-                                                    (panda--project-key project))))
-         (name-selected (completing-read "Select project: " project-names-keys)))
-    (alist-get name-selected project-names-keys nil nil 'equal)))
+  (let ((selected-project-name (completing-read "Select project: "
+                                                (cl-loop for project in panda--builds-cache
+                                                         collect (panda--project-name project)))))
+    (seq-find (lambda (a-proj) (string=
+                                selected-project-name
+                                (panda--project-name a-proj)))
+              panda--builds-cache)))
 
+(defun panda--select-build-plan (the-project)
+  "Run `completing-read' to select a plan under THE-PROJECT.  Return the plan struct."
+  (let* ((plans-in-proj (panda--project-plans the-project))
+         (selected-plan-name (completing-read "Select plan: "
+                                             (cl-loop for plan in plans-in-proj
+                                                      collect (panda--plan-name plan)))))
+    (seq-find (lambda (a-plan) (string=
+                                selected-plan-name
+                                (panda--plan-name a-plan)))
+              plans-in-proj)))
 
+(defun panda--select-build-branch (the-plan)
+  "Run `completing-read' to select a branch under THE-PLAN.  Return the branch struct."
+  ;; TODO: return the branch or the key(s)?
+  (unless (panda--plan-branches the-plan)
+    ;; we still have cached the branches for this one
+    (panda--cache-branches the-plan))
+  (let* ((branches-in-proj (panda--plan-branches the-plan))
+         (selected-branch-name (completing-read "Select branch: "
+                                              (cl-loop for branch in branches-in-proj
+                                                      collect (panda--branch-name branch)))))
+    (seq-find (lambda (a-branch) (string=
+                                  selected-branch-name
+                                  (panda--branch-name a-branch)))
+              branches-in-proj)))
 
-(defun panda--plans (project-key)
-  "Get cached list of plans for a PROJECT-KEY, fetch plans if needed."
+(defun panda--select-build-ppb (&optional project-key plan-key)
+  "Select the project, plan and branch for a build and return the keys.
+If provided PROJECT-KEY and PLAN-KEY won't be prompted."
+  ;; if the plan-key is provided, but not the project, derive the project key from it
   (unless panda--builds-cache
     (panda--refresh-cache-builds))
-  ;; this is probably the fanciest Lisp I wrote so far. See this entry in the CL cookbook:
-  ;; https://lispcookbook.github.io/cl-cookbook/iteration.html#named-loops-and-early-exit
-  ;; I like this better than manually going over the list on my own
-  (cl-loop named find-plans
-           for project in panda--builds-cache
-           when (string= project-key (panda--project-key project))
-           do (cl-return-from find-plans (panda--project-plans project))))
-
-(defun panda--plan (plan-key)
-  "Get cached list of plans for a PROJECT-KEY, fetch plans if needed."
-  (unless panda--builds-cache
-    (panda--refresh-cache-builds))
-  ;; this is probably the fanciest Lisp I wrote so far. See this entry in the CL cookbook:
-  ;; https://lispcookbook.github.io/cl-cookbook/iteration.html#named-loops-and-early-exit
-  ;; I like this better than manually going over the list on my own
-  (cl-loop named find-plans
-           for project in panda--builds-cache
-           when (string= project-key (panda--project-key project))
-           do (cl-return-from find-plans (panda--project-plans project))))
-
-(defun panda--branches (plan-key)
-  (cl-destructuring-bind (project-key &rest plan) (split-string plan-key "-")
-    (let* ((plan (panda--plans project-key))
-           (plan (panda--project-plans project)
-    (message "Project: %s Plan: %s" project-key (string-join plan "-")))
-
-  )
-
-(panda--project-plans project)
+  (when (and (not project-key) plan-key)
+    (setq project-key (cl-first (split-string plan "-"))))
+  (let* ((project (if project-key
+                      (seq-find (lambda (a-proj) (string=
+                                              project-key
+                                              (panda--project-key a-proj)))
+                                panda--builds-cache)
+                    (panda--select-build-project)))
+         (plan (if plan-key
+                   (seq-find (lambda (a-plan) (string=
+                                               plan-key
+                                               (panda--plan-key a-plan)))
+                             (panda--project-plans project))
+                 (panda--select-build-plan project)))
+         (branch (panda--select-build-branch plan)))
+    (list (panda--project-key project)
+          (panda--plan-key plan)
+          (panda--branch-key branch))))
 
 (provide 'panda-structs)
 
