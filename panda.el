@@ -104,9 +104,6 @@ If yes, automatically open it.  No to never ask.  Set to 'ask (default) to be pr
 
 (defvar panda--auth-string nil "Caches the credentials for API calls.")
 (defvar panda--builds-cache nil "Caches all the projects and plans (and eventually branches) the user has access to.")
-(defvar panda--projects-cache nil "Caches all the build projects the user has access to, in one go.")
-(defvar panda--plans-cache nil "Caches the plans for each build project the user has access to, in one go.")
-(defvar panda--branches-cache nil "Caches the branches for each plan, as they are requested.")
 (defvar panda--deploys-cache nil "Caches the deployment projects (not build projects) in one single call to /deploy/project/all.")
 
 (defvar panda--base-plan "[Master plan]")
@@ -262,12 +259,6 @@ Artifacts:
                          (panda--deploys))))
 
 ;;------------------Common UI utilities-------------------------------------------
-
-(defun panda--select-deploy-project ()
-  "Run 'completing-read' to select a deploy project.  Return the project data."
-  (let* ((deploy-names (mapcar 'car (panda--deploys)))
-         (selected (completing-read "Select deploy project: " deploy-names)))
-    selected))
 
 (defun panda--unixms-to-string (unix-milliseconds)
   "Convert UNIX-MILLISECONDS to date string.  I'm surprised this isn't a built in."

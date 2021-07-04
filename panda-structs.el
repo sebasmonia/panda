@@ -92,7 +92,7 @@ Environments without \"allowedToExecute\" permissions are removed."
            collect (panda--make-environment :id (gethash "id" env)
                                             :name (gethash "name" env))))
 
-;;------------------"Accessors" of sorts to the cached data-----------------------
+;;-------------------Access to the cached data for builds, plans and branches-----
 
 (defun panda--select-build-project ()
   "Call `completing-read' for a project, return the `panda--project' selected."
@@ -156,6 +156,21 @@ If provided PROJECT-KEY and PLAN-KEY won't be prompted."
     (list (panda--project-key project)
           (panda--plan-key plan)
           (panda--branch-key branch))))
+
+;;-------------------Access to the cached data for deploys and environments-------
+
+(defun panda--select-deploy-project ()
+  "Run `completing-read' to select a deploy project.  Return a `panda--deploy-project'."
+  (unless panda--deploys-cache
+    (panda--refresh-cache-deploys))
+  (let ((selected-deploy-name (completing-read "Select deploy project: "
+                                               (cl-loop for dep-proj in panda--deploys-cache
+                                                        collect (panda--deploy-project-name dep-proj)))))
+    (seq-find (lambda (a-proj) (string=
+                                selected-deploy-name
+                                (panda--deploy-project-name a-proj)))
+              panda--deploys-cache)))
+
 
 (provide 'panda-structs)
 
