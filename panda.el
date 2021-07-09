@@ -255,7 +255,7 @@ Artifacts:
 
 (defun panda--all-environments ()
   "Return all environments from the cache, in a single list."
-  (apply 'append (mapcar (lambda (deploy-project) (nthcdr 2 deploy-project))
+  (apply #'append (mapcar (lambda (deploy-project) (nthcdr 2 deploy-project))
                          (panda--deploys))))
 
 ;;------------------Common UI utilities-------------------------------------------
@@ -312,7 +312,7 @@ Artifacts:
       (with-current-buffer buffer
         (setq buffer-read-only nil)
         (kill-region (point-min) (point-max)) ;; in case of an update
-        (insert (apply 'format panda--build-buffer-template data-to-display))
+        (insert (apply #'format panda--build-buffer-template data-to-display))
         (setq buffer-read-only t)
         (local-set-key "g" (lambda ()
                              (interactive)
@@ -331,7 +331,7 @@ Artifacts:
     ;; it is a mystery...
     (mapconcat #'identity
                (cl-loop for an-issue across issues
-                        collect (apply 'format "%s\t%s\t%s\t%s\t\"%s\""
+                        collect (apply #'format "%s\t%s\t%s\t%s\t\"%s\""
                                        (list
                                         (gethash "key" an-issue "--")
                                         (gethash "issueType" an-issue "--")
@@ -347,7 +347,7 @@ Artifacts:
       "" ;; defaults to "" if there's no changeset info
     (mapconcat #'identity
                (cl-loop for change across changes-list
-                        collect (apply 'format "%s\t%s"
+                        collect (apply #'format "%s\t%s"
                                        (list (gethash "changesetId" change "--")
                                              (gethash "fullName" change "--"))))
                "\n")))
@@ -368,7 +368,7 @@ Artifacts:
   ;; there is a better way to replace the last part of the build key using a regex
   ;; but I couldn't crack it :(
   (let* ((key-components (split-string build-key "-"))
-         (plan-key (apply 'format "%s-%s" (butlast key-components)))
+         (plan-key (apply #'format "%s-%s" (butlast key-components)))
          (build-number (car (last key-components)))
          (plan-jobs (panda--job-keys-names-for-plan plan-key))
          (buffer-name (format (panda--get-buffer-name 'build-log) build-key))
@@ -395,22 +395,19 @@ Artifacts:
 
 (defun panda--job-keys-names-for-plan (plan-key)
   "Get the job keys for PLAN-KEY."
-  (cl-flet* ((get-id-name (job-data)
-                          (let-alist job-data
-                            (cons .searchEntity.key .searchEntity.jobName)))
-              (get-jobs-list (jobs)
-                             (mapcar #'get-id-name jobs)))
-    (let ((jobs (gethash "searchResults" (panda--api-call (format "/search/jobs/%s" plan-key)))))
-      (get-jobs-list jobs))))
+  (cl-loop for job across (gethash "searchResults" (panda--api-call (format "/search/jobs/%s" plan-key)))
+           collect (cons (panda--gethash '(searchEntity key) job)
+                         (panda--gethash '(searchEntity jobName) job))))
 
 (defun panda--build-log-from-build-job-data (build-job-data)
   "Extract the log entries from BUILD-JOB-DATA."
   ;; TODO merge this and the function that does the same for deploy logs. They are identical!
-  (let-alist build-job-data
-    (mapconcat (lambda (log-entry) (format "[%s] - %s"
-                                           (alist-get 'formattedDate log-entry)
-                                           (alist-get 'unstyledLog log-entry)))
-               .logEntries.logEntry "\n")))
+  (mapconcat 'identity
+             (cl-loop for log-entry across (panda--gethash '(logEntries logEntry) build-job-data)
+                      collect (apply #'format "[%s] - %s"
+                                     (list (gethash "formattedDate" log-entry)
+                                           (gethash "unstyledLog" log-entry))))
+             "\n"))
 
 (defun panda-queue-build (&optional plan-key)
   "Queue a build.  If PLAN-KEY is not provided, select it interactively."
