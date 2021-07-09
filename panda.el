@@ -314,7 +314,13 @@ Artifacts:
         (kill-region (point-min) (point-max)) ;; in case of an update
         (insert (apply 'format panda--build-buffer-template data-to-display))
         (setq buffer-read-only t)
-        (switch-to-buffer-other-window buffer)
+        (local-set-key "g" (lambda ()
+                             (interactive)
+                             (panda-display-build-info build-key)))
+        (local-set-key "q" (lambda ()
+                             (interactive)
+                             (kill-buffer)))
+        (pop-to-buffer buffer)
         (panda--message (concat "Showing details for build " build-key)))))
 
 (defun panda--build-info-format-jira-issues (issues)
@@ -367,7 +373,6 @@ Artifacts:
          (plan-jobs (panda--job-keys-names-for-plan plan-key))
          (buffer-name (format (panda--get-buffer-name 'build-log) build-key))
          (buffer (get-buffer-create buffer-name)))
-    (panda--log (prin1-to-string plan-jobs))
     (with-current-buffer buffer
       (setq buffer-read-only nil)
       (erase-buffer)
@@ -386,7 +391,7 @@ Artifacts:
                            (interactive)
                            (kill-buffer)))
       (panda--message (format "Showing log for the jobs of build %s. Press g to refresh, q to close the buffer." build-key))
-      (switch-to-buffer buffer))))
+      (pop-to-buffer buffer))))
 
 (defun panda--job-keys-names-for-plan (plan-key)
   "Get the job keys for PLAN-KEY."
@@ -395,7 +400,7 @@ Artifacts:
                             (cons .searchEntity.key .searchEntity.jobName)))
               (get-jobs-list (jobs)
                              (mapcar #'get-id-name jobs)))
-    (let ((jobs (alist-get 'searchResults (panda--api-call (format "/search/jobs/%s" plan-key)))))
+    (let ((jobs (gethash "searchResults" (panda--api-call (format "/search/jobs/%s" plan-key)))))
       (get-jobs-list jobs))))
 
 (defun panda--build-log-from-build-job-data (build-job-data)
@@ -446,7 +451,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
       (setq panda--branch-key branch-key)
       (setq tabulated-list-entries build-data)
       (tabulated-list-print)
-      (switch-to-buffer buffer)
+      (pop-to-buffer buffer)
       (panda--message (concat "Listing builds for " branch-key ". Press ? for help and bindings available.")))))
 
 (defun panda--build-results-data (branch-key)
@@ -665,7 +670,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
       (setq panda--deploy-project-id did)
       (setq tabulated-list-entries data-formatted)
       (tabulated-list-print)
-      (switch-to-buffer buffer))
+      (pop-to-buffer buffer))
     (panda--message (concat "Listing deploy status for " project-name ". Press ? for help and bindings available."))))
 
 (defun panda-environment-history (&optional env-id)
@@ -689,7 +694,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
       (local-set-key "l" (lambda ()
                            (interactive)
                            (panda--deploy-log (tabulated-list-get-id))))
-      (switch-to-buffer buffer)
+      (pop-to-buffer buffer)
       (panda--message (concat "Showing deployment history. Press l to see a deploy log for the run under point.")))))
 
 (defun panda--deploy-log (deploy-id)
@@ -717,7 +722,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                            (interactive)
                            (kill-buffer)))
       (panda--message (format "Showing log for deploy %s. Press g to refresh, q to close the buffer." deploy-id))
-      (switch-to-buffer buffer))))
+      (pop-to-buffer buffer))))
 
 (defun panda--deploy-log-from-deploy-data (deploy-data)
   "Extract the log entries from DEPLOY-DATA."
