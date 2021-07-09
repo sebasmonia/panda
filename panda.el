@@ -320,6 +320,7 @@ Artifacts:
         (local-set-key "q" (lambda ()
                              (interactive)
                              (kill-buffer)))
+        (goto-char (point-min))
         (pop-to-buffer buffer)
         (panda--message (concat "Showing details for build " build-key)))))
 
@@ -560,9 +561,9 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
 
 (defun panda--get-deployid-for-plan-key (plan-key)
   "Obtain the deployment id for PLAN-KEY."
-  (let ((forplan-response (panda--api-call "/deploy/project/forPlan"
-                                           (concat "planKey=" plan-key))))
-    (alist-get 'id (elt forplan-response 0))))
+  (gethash "id" (elt (panda--api-call "/deploy/project/forPlan"
+                                      (concat "planKey=" plan-key))
+                     0)))
 
 (defun panda--create-release-execute (build-key did release-name)
   "Make an API call to create a release in DID with RELEASE-NAME out of BUILD-KEY."
@@ -595,8 +596,8 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
 
 (defun panda--proposed-release-name (did build-key)
   "Use DID (deploy project id) and BUILD-KEY to generate the release name."
-  (alist-get 'nextVersionName (panda--api-call (format "/deploy/projectVersioning/%s/nextVersion" did)
-                                               (concat "resultKey=" build-key))))
+  (gethash "nextVersionName" (panda--api-call (format "/deploy/projectVersioning/%s/nextVersion" did)
+                                              (concat "resultKey=" build-key))))
 
 (defun panda-queue-deploy (&optional project environment)
   "Queue a deploy.  If PROJECT and ENVIRONMENT are not provided, select them interactively."
