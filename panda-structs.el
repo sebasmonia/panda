@@ -139,7 +139,7 @@ If provided PROJECT-KEY and PLAN-KEY won't be prompted."
   (unless panda--builds-cache
     (panda--refresh-cache-builds))
   (when (and (not project-key) plan-key)
-    (setq project-key (cl-first (split-string plan "-"))))
+    (setq project-key (cl-first (split-string plan-key "-"))))
   (let* ((project (if project-key
                       (seq-find (lambda (a-proj) (string=
                                               project-key

@@ -291,20 +291,23 @@ Artifacts:
          (buffer-name (format (panda--get-buffer-name 'details) build-key))
          (buffer (get-buffer-create buffer-name))
          (data-to-display nil))
-    (let-alist data
       (setq data-to-display
             (list build-key
-                  .projectName
-                  (or .master.shortName "")
-                  .planName
-                  .state
-                  .prettyBuildStartedTime
-                  .prettyBuildCompletedTime
-                  .buildDurationDescription
-                  .buildReason
-                  .buildTestSummary
-                  (panda--build-info-format-jira-issues .jiraIssues.issue)
-                  (panda--build-info-format-changes .changes.change)
+                  (gethash "projectName" data)
+                  (or (panda--gethash '(master shortName) data) "--")
+                  (gethash "planName" data)
+                  (gethash "state" data)
+                  (gethash "prettyBuildStartedTime" data)
+                  (gethash "prettyBuildCompletedTime" data "--")
+                  (gethash "buildDurationDescription" data "--")
+                  (gethash "buildReason" data "--")
+                  (gethash "buildTestSummary" data "--")
+                  (panda--build-info-format-jira-issues (panda--gethash
+                                                         '(jiraIssues issue)
+                                                         data))
+                  (panda--build-info-format-changes (panda--gethash
+                                                     '(changes change)
+                                                     data))
                   "--")) ;; don't have any to test so...
       (with-current-buffer buffer
         (setq buffer-read-only nil)
@@ -312,27 +315,36 @@ Artifacts:
         (insert (apply 'format panda--build-buffer-template data-to-display))
         (setq buffer-read-only t)
         (switch-to-buffer-other-window buffer)
-        (panda--message (concat "Showing details for build " build-key))))))
+        (panda--message (concat "Showing details for build " build-key)))))
 
 (defun panda--build-info-format-jira-issues (issues)
   "Create a printable string out of ISSUES."
-  (let ((to-concat (mapcar (lambda(x) (apply 'format "%s\t%s\t%s\t%s\t\"%s\""
-                                             (let-alist x (list .key .issueType .status .asignee .summary))))
-                           issues))
-        (printable ""))
-    (when to-concat
-      (setq printable (mapconcat 'identity to-concat "\n")))
-    printable)) ;; defaults to "" if no issues
+  (if (= (length issues) 0)
+      "" ;; return "" if no issues
+    ;; why this doesn't work with concat and does with mapconcat?
+    ;; it is a mystery...
+    (mapconcat #'identity
+               (cl-loop for an-issue across issues
+                        collect (apply 'format "%s\t%s\t%s\t%s\t\"%s\""
+                                       (list
+                                        (gethash "key" an-issue "--")
+                                        (gethash "issueType" an-issue "--")
+                                        (gethash "status" an-issue "--")
+                                        (gethash "asignee" an-issue "--")
+                                        (gethash "summary" an-issue "--"))))
+               "\n")))
+
 
 (defun panda--build-info-format-changes (changes-list)
   "Create a printable string out of CHANGES-LIST."
-  (let ((to-concat (mapcar (lambda(x) (apply 'format "%s\t%s"
-                                             (let-alist x (list .changesetId .fullName))))
-                           changes-list))
-        (printable ""))
-    (when to-concat
-      (setq printable (mapconcat 'identity to-concat "\n")))
-    printable)) ;; defaults to "" if no issues
+  (if (= (length changes-list) 0)
+      "" ;; defaults to "" if there's no changeset info
+    (mapconcat #'identity
+               (cl-loop for change across changes-list
+                        collect (apply 'format "%s\t%s"
+                                       (list (gethash "changesetId" change "--")
+                                             (gethash "fullName" change "--"))))
+               "\n")))
 
 ;; TODO Make interactive version and write to buffer
 (defun panda-get-build-info (build-name plan-key)
@@ -395,10 +407,10 @@ Artifacts:
                                            (alist-get 'unstyledLog log-entry)))
                .logEntries.logEntry "\n")))
 
-(defun panda-queue-build (&optional plan)
-  "Queue a build.  If PLAN is not provided, select it interactively."
+(defun panda-queue-build (&optional plan-key)
+  "Queue a build.  If PLAN-KEY is not provided, select it interactively."
   (interactive)
-  (cl-destructuring-bind (_project-key plan-key branch-key) (panda--select-build-ppb nil plan)
+  (cl-destructuring-bind (_project-key plan-key branch-key) (panda--select-build-ppb nil plan-key)
     (when (equal branch-key (concat plan-key "0"))
       ;; the base plan has a branch number of 0 but
       ;; won't build if using the prefix num
@@ -419,28 +431,28 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
   (cl-destructuring-bind (_project-key _plan-key branch-key) (panda--select-build-ppb nil plan)
     (panda-build-results-branch branch-key)))
 
-(defun panda-build-results-branch (branch)
-  "Fetch the build results for a BRANCH.  For interactive branch selection, use 'panda-build-results'."
+(defun panda-build-results-branch (branch-key)
+  "Fetch the build results for a BRANCH-KEY.  For interactive branch selection, use `panda-build-results'."
   ;; only master plans return the build date on the top level call
   ;; the only option is to fetch the list of build keys and retrieve
   ;; the build date individually for each build
-  (let* ((build-data (panda--build-results-data branch))
-         (buffer-name (format (panda--get-buffer-name 'builds) branch))
+  (let* ((build-data (panda--build-results-data branch-key))
+         (buffer-name (format (panda--get-buffer-name 'builds) branch-key))
          (buffer (get-buffer-create buffer-name)))
     (with-current-buffer buffer
       ;; setup the tablist
       (panda--build-results-mode)
       ;; buffer local variables
-      (setq panda--branch-key branch)
+      (setq panda--branch-key branch-key)
       (setq tabulated-list-entries build-data)
       (tabulated-list-print)
       (switch-to-buffer buffer)
-      (panda--message (concat "Listing builds for " branch ". Press ? for help and bindings available.")))))
+      (panda--message (concat "Listing builds for " branch-key ". Press ? for help and bindings available.")))))
 
 (defun panda--build-results-data (branch-key)
   "Get BRANCH-KEY build data for 'tabulated-list-entries'."
-    (let ((build-keys (panda--latest-build-keys branch-key)))
-      (mapcar 'panda--fetch-build-bykey build-keys)))
+  (cl-loop for build-key in (panda--latest-build-keys branch-key)
+           collect (panda--fetch-build-bykey build-key)))
 
 (defun panda--latest-build-keys (branch-key)
   "Get the list of links to retreive the latest builds for BRANCH-KEY."
@@ -449,23 +461,24 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                                "&includeAllStates=true"))
            (data (panda--api-call target-url parameters)))
       (let-alist data
-        (mapcar (lambda (build) (alist-get 'key build))
-                .results.result))))
+        (cl-loop for build across (panda--gethash '(results result) data)
+                 collect (gethash "key" build)))))
 
 (defun panda--fetch-build-bykey (build-key)
   "Return the data for BUILD-KEY formatted for tabulated mode."
-  (let* ((build-data (panda--api-call (concat "/result/" build-key))))
-    (let-alist build-data
-      ;; tabulated list requires a list with an ID and a vector
-      ;; and also doesn't like nil values, hence the 'or' fest
-      (list .key
-            (vector .key
-                    (or .state "")
-                    (or .prettyBuildStartedTime "")
-                    (or .prettyBuildCompletedTime "")
-                    (or .buildDurationDescription "")
-                    (or .master.key ;; for branches this will be non-empty
-                        .plan.key)))))) ;; if we get here this is a base plan
+  (let* ((build-data (panda--api-call (concat "/result/" build-key)))
+         (is-master-plan (gethash "master" build-data)))
+    (list (gethash "key" build-data)
+          (vector (gethash "key" build-data "")
+                  (gethash "state" build-data "")
+                  (gethash "prettyBuildStartedTime" build-data "")
+                  (gethash "prettyBuildCompletedTime" build-data "")
+                  (gethash "buildDurationDescription" build-data "")
+                  (if is-master-plan
+                      ;; for branches this will be non-empty
+                      (panda--gethash '(master key) build-data)
+                    ;; else, this is a base plan
+                    (panda--gethash '(plan key) build-data))))))
 
 (define-derived-mode panda--build-results-mode tabulated-list-mode "Panda build results view" "Major mode to display Bamboo's build results."
   (setq tabulated-list-format [("Build key" 20 nil)
@@ -586,7 +599,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
 (defun panda-queue-deploy (&optional project environment)
   "Queue a deploy.  If PROJECT and ENVIRONMENT are not provided, select them interactively."
   (interactive)
-  (let* ((project-name (or project (panda--select-deploy-project)))
+  (let* ((deploy-project (or project (panda--select-deploy-project)))
          (metadata (panda--agetstr project-name (panda--deploys)))
          (did (car metadata))
          (environments (cdr metadata))
