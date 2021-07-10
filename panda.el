@@ -308,7 +308,9 @@ Artifacts:
                   (panda--build-info-format-changes (panda--gethash
                                                      '(changes change)
                                                      data))
-                  "--")) ;; don't have any to test so...
+                  (panda--build-info-format-artifacts (panda--gethash
+                                                       '(artifacts artifact)
+                                                       data))))
       (with-current-buffer buffer
         (setq buffer-read-only nil)
         (kill-region (point-min) (point-max)) ;; in case of an update
@@ -327,7 +329,7 @@ Artifacts:
 (defun panda--build-info-format-jira-issues (issues)
   "Create a printable string out of ISSUES."
   (if (= (length issues) 0)
-      "" ;; return "" if no issues
+      "--" ;; return "--" if no issues
     ;; why this doesn't work with concat and does with mapconcat?
     ;; it is a mystery...
     (mapconcat #'identity
@@ -341,16 +343,29 @@ Artifacts:
                                         (gethash "summary" an-issue "--"))))
                "\n")))
 
-
-(defun panda--build-info-format-changes (changes-list)
-  "Create a printable string out of CHANGES-LIST."
-  (if (= (length changes-list) 0)
-      "" ;; defaults to "" if there's no changeset info
+(defun panda--build-info-format-changes (changes-vector)
+  "Create a printable string out of CHANGES-VECTOR."
+  (if (= (length changes-vector) 0)
+      "--" ;; defaults to "" if there's no changeset info
     (mapconcat #'identity
-               (cl-loop for change across changes-list
+               (cl-loop for change across changes-vector
                         collect (apply #'format "%s\t%s"
                                        (list (gethash "changesetId" change "--")
                                              (gethash "fullName" change "--"))))
+               "\n")))
+
+(defun panda--build-info-format-artifacts (artifacts-vector)
+  "Create a printable string out of ARTIFACTS-VECTOR."
+  (if (= (length artifacts-vector) 0)
+      "--" ;; defaults to "--" if there are no artifacts
+    (mapconcat #'identity
+               (cl-loop for artifact across artifacts-vector
+                        collect (apply #'format "%s\t%s\tShared: %s"
+                                       (list (gethash "name" artifact "--")
+                                             (gethash "prettySizeDescription" artifact "--")
+                                             (if (gethash "shared" artifact)
+                                                 "Yes"
+                                               "No"))))
                "\n")))
 
 ;; TODO Make interactive version and write to buffer
