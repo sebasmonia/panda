@@ -32,11 +32,9 @@
 
 (require 'json)
 (require 'cl-lib)
-(require 'url)
-(require 'browse-url)
 (require 'seq)
 (require 'subr-x)
-(require 'panda-api)
+(require 'panda-api-utils)
 (require 'panda-structs)
 
 (defgroup panda nil
@@ -104,14 +102,10 @@ If yes, automatically open it.  No to never ask.  Set to 'ask (default) to be pr
 
 (defvar panda--auth-string nil "Caches the credentials for API calls.")
 (defvar panda--builds-cache nil "Caches all the projects and plans (and eventually branches) the user has access to.")
-(defvar panda--deploys-cache nil "Caches the deployment projects (not build projects) in one single call to /deploy/project/all.")
+(defvar panda--deploys-cache nil "Caches the deployment projects (not build projects) using a single call to /deploy/project/all.")
 
 (defvar panda--base-plan "[Master plan]")
-(defvar panda--build-status-for-release "Successful")
-
-(defvar panda--branch-key nil "Buffer local variable for panda--build-status-mode.")
-(defvar panda--project-name nil "Buffer local variable for panda--deploy-results-mode.")
-(defvar panda--deploy-project-id nil "Buffer local variable for panda--deploy-results-mode.")
+(defvar panda--build-status-for-release "Successful" "This is the only build status allowed to create releases.")
 
 (defvar panda--browse-build "/browse/%s" "What to add to 'panda-browser-url to open builds in the browser.")
 (defvar panda--browse-deploy-project "/deploy/viewDeploymentProjectEnvironments.action?id=%s" "What to add to 'panda-browser-url to open deploy projects in the browser.")
@@ -150,11 +144,7 @@ Artifacts:
 %s" "Template to call 'format' for the build details buffer.")
 
 (defvar-local panda--branch-key nil "Used in `panda--build-results-mode' to store the current branch key.")
-
-(defvar-local panda--project-name nil "Used in `panda--deploy-results-mode' to store the current project.")
-
-(defvar-local panda--deploy-project-id nil "Used in `panda--deploy-results-mode' to store the current deployment project ID.")
-
+(defvar-local panda--current-deploy-project nil "Used in `panda--deploy-results-mode' to store the current deployment project.")
 
 (defvar panda-map
   (let ((main-map (make-sparse-keymap "Bamboo operations"))
@@ -176,35 +166,7 @@ Artifacts:
 ; Interactive commands not mapped:
 ;; panda-clear-credentials
 
-;;------------------Package infrastructure----------------------------------------
-
-(defun panda--message (text)
-  "Show a TEXT as a message and log it, if 'panda-less-messages' log only."
-  (unless panda-less-messages
-    (message text))
-  (panda--log "Package message:" text "\n"))
-
-(defun panda--log (&rest to-log)
-  "Append TO-LOG to the log buffer.  Intended for internal use only."
-  (let ((log-buffer (get-buffer-create "*panda-log*"))
-        (text (cl-reduce (lambda (accum elem) (concat accum " " (prin1-to-string elem t))) to-log)))
-    (with-current-buffer log-buffer
-      (goto-char (point-max))
-      (insert text)
-      (insert "\n"))))
-
-(defun panda--show-help (help-message)
-  "Display the *Panda Help* buffer with the text in HELP-MESSAGE."
-  (with-output-to-temp-buffer "*Panda Help*"
-    (princ help-message)))
-
-(defun panda--get-buffer-name (key)
-  "Return the buffer name to a KEY, considering the user's customizations."
-  (let ((prefix (if panda-prefix-buffers "Panda - " ""))
-        (name (alist-get key panda--buffer-name-alist)))
-    (format "*%s%s*" prefix name)))
-
-;;------------------Cache for projects, plans, and branches-----------------------
+;;------------------Cache for credentials, projects, plans, and branches----------
 
 (defun panda-clear-credentials ()
   "Clear current credentials, next API call will request them again."
@@ -257,30 +219,6 @@ Artifacts:
   "Return all environments from the cache, in a single list."
   (apply #'append (mapcar (lambda (deploy-project) (nthcdr 2 deploy-project))
                          (panda--deploys))))
-
-;;------------------Common UI utilities-------------------------------------------
-
-(defun panda--unixms-to-string (unix-milliseconds)
-  "Convert UNIX-MILLISECONDS to date string.  I'm surprised this isn't a built in."
-  (let ((format-str "%Y-%m-%d %T")
-        (unix-epoch "1970-01-01T00:00:00+00:00")
-        (converted "")
-        (seconds nil))
-    (condition-case nil
-        (progn
-          (setq seconds (/ unix-milliseconds 1000))
-          (setq converted
-                (format-time-string format-str
-                                    (time-add (date-to-time unix-epoch)
-                                              seconds))))
-      (error (setq converted "")))
-    converted))
-
-(defun panda--browse (path)
-  "Open the default browser using PATH."
-  (unless panda-browser-url
-    (error "There's no broser URL for Bamboo configured.  Try customize-group -> panda"))
-  (browse-url (concat panda-browser-url path)))
 
 ;;------------------Build querying and information--------------------------------
 
@@ -367,17 +305,6 @@ Artifacts:
                                                  "Yes"
                                                "No"))))
                "\n")))
-
-;; TODO Make interactive version and write to buffer
-(defun panda-get-build-info (build-name plan-key)
-  "Retrieve the information of BUILD-NAME for PLAN-KEY."
-  (let* ((split-data (split-string build-name "_"))
-         (build-number (car (last split-data)))
-         (branch-name (mapconcat 'identity (butlast split-data) "_")))
-    (setq branch-name (replace-regexp-in-string "/" "-" branch-name))
-    (unless (string= branch-name "develop")
-      (setq plan-key (panda--agetstr branch-name (panda--branches plan-key))))
-    (panda--api-call (concat "/result/" plan-key "-" build-number))))
 
 (defun panda-display-build-logs (build-key)
   "Show a buffer with the logs for the jobs of BUILD-KEY.  Invoked from build status list."
@@ -617,33 +544,32 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
 (defun panda-queue-deploy (&optional project environment)
   "Queue a deploy.  If PROJECT and ENVIRONMENT are not provided, select them interactively."
   (interactive)
-  (let* ((deploy-project (or project (panda--select-deploy-project)))
-         (metadata (panda--agetstr project-name (panda--deploys)))
-         (did (car metadata))
-         (environments (cdr metadata))
-         (deploy-data (panda--deploys-for-id did))
-         (selected-release (completing-read "Select release: "
-                                                (mapcar 'cl-first deploy-data)))
-         (selected-environment (or environment
-                                   (completing-read "Select an environment: "
-                                                    (mapcar 'cl-first environments))))
+  (let* ((deploy-project (panda--select-deploy-project project))
+         (depproj-environments (panda--deploy-project-environments deploy-project))
+         (deploy-data (panda--deploys-for-id (panda--deploy-project-id deploy-project)))
+         (release-name (completing-read "Select release: " deploy-data))
+         (environment-name (or environment
+                               (completing-read "Select an environment: "
+                                                (mapcar #'panda--environment-name
+                                                        depproj-environments))))
          (confirmed t)) ;; we'll check if there's a regex match later
     (when (not (string-empty-p panda-deploy-confirmation-regex))
-      (if (string-match-p panda-deploy-confirmation-regex selected-environment)
-          (setq confirmed (y-or-n-p (format "OK to deploy version %s to environment %s? " selected-release selected-environment)))
+      (if (string-match-p panda-deploy-confirmation-regex environment-name)
+          (setq confirmed (y-or-n-p (format "OK to deploy version %s to environment %s? " release-name environment-name)))
         (setq confirmed t))) ;; if it doesn't match the regex we don't need to ask
-
     (if confirmed
         (progn
           (panda--api-call "/queue/deployment"
                            (format "environmentId=%s&versionId=%s"
-                                   (car (panda--agetstr selected-environment environments))
-                                   (car (panda--agetstr selected-release deploy-data)))
+                                   (panda--environment-id (panda--select-environment
+                                                           deploy-project
+                                                           environment-name))
+                                   (alist-get release-name deploy-data nil nil 'equal))
                            "POST")
           (panda--message "Deployment requested")
           (if (and project environment) ;; not 100% correct way of identifying calls from the deploy status buffer
               (panda-deploy-status project) ;; just show it/update it
-            (panda--show-deploy-status project-name))) ;; depends on the config
+            (panda--show-deploy-status (panda--deploy-project-name deploy-project)))) ;; depends on the config
       (message "Deployment cancelled"))))
 
 (defun panda--show-deploy-status (project-name)
@@ -654,49 +580,32 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
     (when show-status
       (panda-deploy-status project-name))))
 
-(defun panda--deploys-for-id (did)
-  "Get the deployments of a DID (deployment id)."
-  (let* ((url (format "/deploy/project/%s/versions" did))
-         (parameters (format "max-results=%s" panda-latest-max-results))
-         (data (panda--api-call url parameters))
-         (deploys (alist-get 'versions data)))
-    (mapcar
-     (lambda (dep) (let-alist dep (list .name .id)))
-     deploys)))
-
 (defun panda-deploy-status (&optional project)
   "Display a project's deploy status.  If PROJECT is not provided, select it interactively."
   (interactive)
-  (let* ((project-name (or project (panda--select-deploy-project)))
-         (metadata (panda--agetstr project-name (panda--deploys)))
-         (did (car metadata))
-         (data (elt (panda--api-call (format "/deploy/dashboard/%s" did)) 0))
-         (envs (alist-get 'environmentStatuses data))
-         (data-formatted (mapcar 'panda--format-deploy-status envs))
-         (buffer-name (format (panda--get-buffer-name 'deploys) project-name))
+  (let* ((deploy-project (panda--select-deploy-project project))
+         (data-formatted (panda--deploy-status-fetch deploy-project))
+         (buffer-name (format (panda--get-buffer-name 'deploys)
+                              (panda--deploy-project-name deploy-project)))
          (buffer (get-buffer-create buffer-name)))
     (with-current-buffer buffer
       ;; change to tablist mode
       (panda--deploy-results-mode)
       ;;buffer local variables
-      (setq panda--project-name project-name)
-      (setq panda--deploy-project-id did)
+      (setq panda--current-deploy-project deploy-project)
       (setq tabulated-list-entries data-formatted)
       (tabulated-list-print)
       (pop-to-buffer buffer))
-    (panda--message (concat "Listing deploy status for " project-name ". Press ? for help and bindings available."))))
+    (panda--message (concat "Listing deploy status for "
+                            (panda--deploy-project-name deploy-project)
+                            ". Press ? for help and bindings available."))))
 
 (defun panda-environment-history (&optional env-id)
-  "Show the history of ENV-ID in a new buffer.  If env-id is not provided, it will be prompted."
+  "Show the history of ENV-ID in a new buffer.  If ENV-ID is not provided, it will be prompted."
   (interactive)
-  (unless env-id
-    (let* ((project (panda--select-deploy-project))
-           (project-data (panda--agetstr project (panda--deploys)))
-           (env-name (completing-read "Select an environment: "
-                                      (mapcar 'car (cdr project-data)))))
-      (setq env-id (panda--env-id-from-name env-name))))
-  (let* ((environment-data (panda--api-call (format "/deploy/environment/%s/results" env-id)))
-         (data-formatted (mapcar 'panda--format-env-history (alist-get 'results environment-data)))
+  (let* ((environment (panda--select-environment nil nil env-id)
+         (data-formatted (panda--environment-history-fetch (or env-id
+                                                               )))
          (environment-name (panda--env-name-from-id env-id))
          (buffer-name (format (panda--get-buffer-name 'env-history) environment-name))
          (buffer (get-buffer-create buffer-name)))
@@ -712,11 +621,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
 
 (defun panda--deploy-log (deploy-id)
   "Show the log of DEPLOY-ID in a new buffer."
-  (let* ((deploy-data (panda--api-call (format "/deploy/result/%s" deploy-id)
-                                       ;; questionable, if you have more than 1 million lines log
-                                       ;; there are bigger problems if we actually get it all...
-                                       "includeLogs=true&max-results=1000000"))
-         (logs (panda--deploy-log-from-deploy-data deploy-data))
+  (let* ((logs (panda--deploy-log-fetch deploy-id))
          (buffer-name (format (panda--get-buffer-name 'deploy-log) deploy-id))
          (buffer (get-buffer-create buffer-name)))
     (with-current-buffer buffer
@@ -737,27 +642,6 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
       (panda--message (format "Showing log for deploy %s. Press g to refresh, q to close the buffer." deploy-id))
       (pop-to-buffer buffer))))
 
-(defun panda--deploy-log-from-deploy-data (deploy-data)
-  "Extract the log entries from DEPLOY-DATA."
-  (let-alist deploy-data
-    (mapconcat (lambda (log-entry) (format "[%s] - %s"
-                                           (alist-get 'formattedDate log-entry)
-                                           (alist-get 'unstyledLog log-entry)))
-               .logEntries.logEntry "\n")))
-
-(defun panda--env-name-from-id (env-id)
-  "Find the environment name from ENV-ID."
-  ;; this is really inneficient. Should revisit.
-  ;; still faster than making an API call most likely
-  (let ((found nil))
-    (dolist (deploy-data (panda--deploys) found)
-      (let* ((env-data (nthcdr 2 deploy-data))
-             (id-matched (cl-remove-if-not (lambda (env) (eq env-id (cadr env)))
-                                           env-data)))
-        (when id-matched
-          (setq found (caar id-matched)))))
-    found))
-
 (defun panda--env-id-from-name (env-name)
   "Obtain the env-id for ENV-NAME."
   (cadar (cl-remove-if-not (lambda (env) (string= env-name (car env)))
@@ -771,31 +655,6 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                                ("Version name" 0 nil)])
   (setq tabulated-list-padding 1)
   (tabulated-list-init-header))
-
-(defun panda--format-env-history (deploy-data)
-  "Format DEPLOY-DATA for tabulated output."
-  (let-alist deploy-data
-    (list .id
-          (vector .deploymentState
-                  .lifeCycleState
-                  (panda--unixms-to-string .startedDate)
-                  (panda--unixms-to-string .finishedDate)
-                  .deploymentVersionName))))
-
-(defun panda--format-deploy-status (deploy-status)
-  "Format DEPLOY-STATUS for tabulated output."
-  ;; tabulated list requires a list with an ID and a vector
-  (let-alist deploy-status
-    (list .environment.name
-          (vector .environment.name
-                  (or .deploymentResult.lifeCycleState "")
-                  (or .deploymentResult.deploymentState "")
-                  (panda--unixms-to-string .deploymentResult.startedDate)
-                  (panda--unixms-to-string .deploymentResult.finishedDate)
-                  (if .deploymentResult.id
-                      (format "%s" .deploymentResult.id)
-                    "")
-                  (or .deploymentResult.deploymentVersion.name "")))))
 
 (define-derived-mode panda--deploy-results-mode tabulated-list-mode "Panda deploy results view" "Major mode to display Bamboo's deploy results."
   (setq tabulated-list-format [("Environment" 45 nil)
@@ -833,24 +692,30 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
 (defun panda--deploy-results-refresh ()
   "Reload the current `panda--deploy-results-mode' buffer."
   (interactive)
-  (panda-deploy-status panda--project-name)
-  (panda--message (concat "Updated deploy status for " panda--project-name)))
+  (let ((deploy-proj-name (panda--deploy-project-name panda--current-deploy-project)))
+    (panda-deploy-status deploy-proj-name)
+    (panda--message (concat "Updated deploy status for " deploy-proj-name))))
 
 (defun panda--deploy-results-browse ()
   "Open a browser in the deploy under point in `panda--deploy-results-mode'."
   (interactive)
-  (panda--browse (format panda--browse-deploy-project panda--deploy-project-id)))
+  (panda--browse (format panda--browse-deploy-project
+                         (panda--deploy-project-id panda--current-deploy-project))))
 
 (defun panda--deploy-results-queue ()
   "Queue a deploy for the environment at point in a `panda--deploy-results-mode' list."
   (interactive)
-  (panda-queue-deploy panda--project-name (tabulated-list-get-id)))
+  (panda-queue-deploy (panda--deploy-project-name panda--current-deploy-project)
+                      (tabulated-list-get-id)))
 
 (defun panda--deploy-results-history ()
   "Show the selected environment's history in `panda--deploy-results-mode'."
   (interactive)
-  (panda-environment-history (panda--env-id-from-name
-                              (tabulated-list-get-id))))
+  (panda-environment-history
+   (seq-find (lambda (env) (string= (panda--environment-name env)
+                                    (tabulated-list-get-id)))
+             (panda--deploy-project-environments panda--current-deploy-project))))
+
 (defun panda--deploy-results-log ()
   "Show the log for the last (or running) deploy in `panda--deploy-results-mode'."
   (interactive)

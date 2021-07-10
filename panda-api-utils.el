@@ -1,4 +1,4 @@
-;;; panda-api.el --- API interactions for panda.el.  -*- lexical-binding: t; -*-
+;;; panda-api-utils.el --- API calls and utilities for panda.el.  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2021 Sebastián Monía
 ;;
@@ -14,7 +14,8 @@
 
 ;;; Commentary:
 
-;; This file holds the http interactions and JSON parsing for Panda.
+;; This file holds the http interactions and JSON parsing for Panda,
+;; and some common utils functions.
 ;; See panda.el for the main file of the package.
 ;;
 ;; For a detailed user manual see:
@@ -25,6 +26,7 @@
 (require 'json)
 (require 'url)
 (require 'cl-lib)
+(require 'browse-url)
 
 (defvar panda--auth-string nil "Caches the credentials for API calls.")
 
@@ -77,13 +79,55 @@
        (panda--log "Stored credentials for this session")))
   (concat "Basic " panda--auth-string))
 
+;;------------------Package utilities---------------------------------------------
 
-;;------------------JSON traversal and list conversion----------------------------
+(defun panda--message (text)
+  "Show a TEXT as a message and log it, if 'panda-less-messages' log only."
+  (unless panda-less-messages
+    (message text))
+  (panda--log "Package message:" text))
 
-(defun panda--agetstr (key alist)
-  "Do 'alist-get' for KEY in ALIST with string keys."
-  (alist-get key alist nil nil 'equal))
+(defun panda--log (&rest to-log)
+  "Append TO-LOG to the log buffer.  Intended for internal use only."
+  (let ((log-buffer (get-buffer-create "*panda-log*"))
+        (text (cl-reduce (lambda (accum elem) (concat accum " " (prin1-to-string elem t))) to-log)))
+    (with-current-buffer log-buffer
+      (goto-char (point-max))
+      (insert text)
+      (insert "\n"))))
 
+(defun panda--show-help (help-message)
+  "Display the *Panda Help* buffer with the text in HELP-MESSAGE."
+  (with-output-to-temp-buffer "*Panda Help*"
+    (princ help-message)))
 
-(provide 'panda-api)
-;;; panda-api.el ends here
+(defun panda--get-buffer-name (key)
+  "Return the buffer name to a KEY, considering the user's customizations."
+  (let ((prefix (if panda-prefix-buffers "Panda - " ""))
+        (name (alist-get key panda--buffer-name-alist)))
+    (format "*%s%s*" prefix name)))
+
+(defun panda--unixms-to-string (unix-milliseconds)
+  "Convert UNIX-MILLISECONDS to date string.  I'm surprised this isn't a built in."
+  (let ((format-str "%Y-%m-%d %T")
+        (unix-epoch "1970-01-01T00:00:00+00:00")
+        (converted "")
+        (seconds nil))
+    (condition-case nil
+        (progn
+          (setq seconds (/ unix-milliseconds 1000))
+          (setq converted
+                (format-time-string format-str
+                                    (time-add (date-to-time unix-epoch)
+                                              seconds))))
+      (error (setq converted "")))
+    converted))
+
+(defun panda--browse (path)
+  "Open the default browser using PATH."
+  (unless panda-browser-url
+    (error "There's no broser URL for Bamboo configured.  Try customize-group -> panda"))
+  (browse-url (concat panda-browser-url path)))
+
+(provide 'panda-api-utils)
+;;; panda-api-utils.el ends here

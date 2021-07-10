@@ -23,6 +23,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'panda-api-utils)
 
 ;;------------------Struct definitions--------------------------------------------
 
@@ -159,18 +160,121 @@ If provided PROJECT-KEY and PLAN-KEY won't be prompted."
 
 ;;-------------------Access to the cached data for deploys and environments-------
 
-(defun panda--select-deploy-project ()
-  "Run `completing-read' to select a deploy project.  Return a `panda--deploy-project'."
+(defun panda--all-dep-project-names ()
+  (cl-loop for dep-proj in panda--deploys-cache
+           collect (panda--deploy-project-name dep-proj)))
+
+(defun panda--select-deploy-project (&optional deploy-project-name)
+  "Get the deploy project that matches DEPLOY-PROJECT-NAME, if provided.
+If missing, use `completing-read' to select the project by name.
+Return a `panda--deploy-project'."
   (unless panda--deploys-cache
     (panda--refresh-cache-deploys))
-  (let ((selected-deploy-name (completing-read "Select deploy project: "
-                                               (cl-loop for dep-proj in panda--deploys-cache
-                                                        collect (panda--deploy-project-name dep-proj)))))
+  (let ((selected-deploy-name (or deploy-project-name
+                                  (completing-read "Select deploy project: "
+                                                   (panda--all-dep-project-names)))))
     (seq-find (lambda (a-proj) (string=
                                 selected-deploy-name
                                 (panda--deploy-project-name a-proj)))
               panda--deploys-cache)))
 
+(defun panda--select-deploy-project (&optional deploy-project-name)
+  "Get the deploy project that matches DEPLOY-PROJECT-NAME, if provided.
+If missing, use `completing-read' to select the project by name.
+Return a `panda--deploy-project'."
+  (unless panda--deploys-cache
+    (panda--refresh-cache-deploys))
+  (let ((selected-deploy-name (or deploy-project-name
+                                  (completing-read "Select deploy project: "
+                                                   (panda--all-dep-project-names)))))
+    (seq-find (lambda (a-proj) (string=
+                                selected-deploy-name
+                                (panda--deploy-project-name a-proj)))
+              panda--deploys-cache)))
+
+(defun panda--select-environment (&optional deploy-project-name env-name env-id)
+  "Find an environment from a DEPLOY-PROJECT-NAME, using its ENV-NAME or ENV-ID.
+If some parameters are missing, use `completing-read' to select interactively."
+  (let* ((deploy-project (panda--select-deploy-project deploy-project-name))
+         (depproj-environments (panda--deploy-project-environments deploy-project)))
+    (if env-id
+        ;; search by id, should be direct
+        (seq-find (lambda (an-env) (= env-id
+                                      (panda--environment-id an-env)))
+                  (panda--deploy-project-environments deploy-proj))
+      ;;the id wasn't provided, try by name, use completing-read if needed
+      (panda--depproj-env-by-name deploy-project
+                                  (or env-name
+                                      (completing-read "Select an environment: "
+                                                       (mapcar #'panda--environment-name
+                                                               depproj-environments)))))))
+
+(defun panda--depproj-env-by-name (deploy-proj env-name)
+  "Return the environment id of ENV-NAME, an environment in DEPLOY-PROJ."
+  (seq-find (lambda (an-env) (string=
+                              env-name
+                              (panda--environment-name an-env)))
+            (panda--deploy-project-environments deploy-proj)))
+
+;;-------------------API calls that don't use structs but need formatting---------
+
+(defun panda--deploys-for-id (did)
+  "Get the deployments of a DID (deployment id)."
+  (let* ((api-response (panda--api-call (format "/deploy/project/%s/versions" did )
+                                        (format "max-results=%s" panda-latest-max-results))))
+    (cl-loop for deploy across (gethash "versions" api-response)
+             collect (cons (gethash "name" deploy)
+                           (gethash "id" deploy)))))
+
+(defun panda--deploy-status-fetch (deploy-project)
+  "Retrieve and format the deploy status data for DEPLOY-PROJECT."
+  (let ((api-response (panda--api-call (format "/deploy/dashboard/%s" (panda--deploy-project-id deploy-project)))))
+    (cl-loop for env-status across (gethash "environmentStatuses" (elt api-response 0))
+             collect (panda--format-deploy-status env-status))))
+
+(defun panda--format-deploy-status (deploy-status)
+  "Format DEPLOY-STATUS for tabulated output."
+  ;; tabulated list requires a list with an ID and a vector
+  (let ((env-name (panda--gethash '(environment name) deploy-status))
+        (result (gethash "deploymentResult" deploy-status)))
+    (if result
+        (list env-name
+              (vector env-name
+                      (gethash "lifeCycleState" result "--")
+                      (gethash "deploymentState" result "--")
+                      (panda--unixms-to-string (gethash "startedDate" result))
+                      (panda--unixms-to-string (gethash "finishedDate" result))
+                      (format "%s" (gethash "id" result "--"))
+                      (or (panda--gethash '(deploymentVersion name) result) "--")))
+      (list env-name
+            (vector env-name "--" "--" "--" "--" "--" "--")))))
+
+(defun panda--deploy-log-fetch (deploy-id)
+  "Retrieve and format the logs for DEPLOY-ID."
+  (let ((api-response (panda--api-call (format "/deploy/result/%s" deploy-id)
+                                       ;; questionable, if you have more than 1 million lines log
+                                       ;; there are bigger problems if we actually get it all...
+                                       "includeLogs=true&max-results=1000000")))
+    (mapconcat (lambda (log-entry) (format "[%s] - %s"
+                                           (gethash "formattedDate" log-entry)
+                                           (gethash "unstyledLog" log-entry)))
+               (panda--gethash '(logEntries logEntry) api-response)
+               "\n")))
+
+(defun panda--environment-history-fetch (environment-id)
+  "Retrieve and format the history data for ENVIRONMENT-ID."
+  (let ((api-response (panda--api-call (format "/deploy/environment/%s/results" environment-id))))
+    (cl-loop for result across (gethash "results" api-response)
+             collect (panda--format-env-history result))))
+
+(defun panda--format-env-history (deploy-data)
+  "Format DEPLOY-DATA for tabulated output."
+  (list (gethash "id" deploy-data)
+        (vector (gethash "deploymentState" deploy-data)
+                (gethash "lifeCycleState" deploy-data)
+                (panda--unixms-to-string (gethash "startedDate" deploy-data))
+                (panda--unixms-to-string (gethash "finishedDate" deploy-data))
+                (gethash "deploymentVersionName" deploy-data))))
 
 (provide 'panda-structs)
 
