@@ -541,34 +541,28 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
   (gethash "nextVersionName" (panda--api-call (format "/deploy/projectVersioning/%s/nextVersion" did)
                                               (concat "resultKey=" build-key))))
 
-(defun panda-queue-deploy (&optional project environment)
-  "Queue a deploy.  If PROJECT and ENVIRONMENT are not provided, select them interactively."
+(defun panda-queue-deploy (&optional project-name environment-name)
+  "Queue a deploy.  If PROJECT-NAME and ENVIRONMENT-ID are not provided, select them interactively."
   (interactive)
-  (let* ((deploy-project (panda--select-deploy-project project))
-         (depproj-environments (panda--deploy-project-environments deploy-project))
-         (deploy-data (panda--deploys-for-id (panda--deploy-project-id deploy-project)))
-         (release-name (completing-read "Select release: " deploy-data))
-         (environment-name (or environment
-                               (completing-read "Select an environment: "
-                                                (mapcar #'panda--environment-name
-                                                        depproj-environments))))
+  (let* ((deploy-project (panda--select-deploy-project project-name))
+         (release-data (panda--releases-for-did (panda--deploy-project-id deploy-project)))
+         (release-name (completing-read "Select release: " release-data))
+         (environment (panda--select-environment project-name environment-name))
          (confirmed t)) ;; we'll check if there's a regex match later
     (when (not (string-empty-p panda-deploy-confirmation-regex))
-      (if (string-match-p panda-deploy-confirmation-regex environment-name)
+      (if (string-match-p panda-deploy-confirmation-regex (panda--environment-name environment))
           (setq confirmed (y-or-n-p (format "OK to deploy version %s to environment %s? " release-name environment-name)))
         (setq confirmed t))) ;; if it doesn't match the regex we don't need to ask
     (if confirmed
         (progn
           (panda--api-call "/queue/deployment"
                            (format "environmentId=%s&versionId=%s"
-                                   (panda--environment-id (panda--select-environment
-                                                           deploy-project
-                                                           environment-name))
-                                   (alist-get release-name deploy-data nil nil 'equal))
+                                   (panda--environment-id environment)
+                                   (alist-get release-name release-data nil nil 'equal))
                            "POST")
           (panda--message "Deployment requested")
-          (if (and project environment) ;; not 100% correct way of identifying calls from the deploy status buffer
-              (panda-deploy-status project) ;; just show it/update it
+          (if (and project-name environment-name) ;; not 100% correct way of identifying calls from the deploy status buffer
+              (panda-deploy-status (panda--deploy-project-name deploy-project)) ;; just show it/update it
             (panda--show-deploy-status (panda--deploy-project-name deploy-project)))) ;; depends on the config
       (message "Deployment cancelled"))))
 
@@ -580,10 +574,10 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
     (when show-status
       (panda-deploy-status project-name))))
 
-(defun panda-deploy-status (&optional project)
-  "Display a project's deploy status.  If PROJECT is not provided, select it interactively."
+(defun panda-deploy-status (&optional project-name)
+  "Display a project's deploy status.  If PROJECT-NAME is not provided, select it interactively."
   (interactive)
-  (let* ((deploy-project (panda--select-deploy-project project))
+  (let* ((deploy-project (panda--select-deploy-project project-name))
          (data-formatted (panda--deploy-status-fetch deploy-project))
          (buffer-name (format (panda--get-buffer-name 'deploys)
                               (panda--deploy-project-name deploy-project)))
@@ -600,14 +594,14 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                             (panda--deploy-project-name deploy-project)
                             ". Press ? for help and bindings available."))))
 
-(defun panda-environment-history (&optional env-id)
-  "Show the history of ENV-ID in a new buffer.  If ENV-ID is not provided, it will be prompted."
+(defun panda-environment-history (&optional project-name env-name)
+  "Show the history of PROJECT-NAME -> ENV-NAME in a new buffer.
+If parameters aren't provided, they will be prompted."
   (interactive)
-  (let* ((environment (panda--select-environment nil nil env-id)
-         (data-formatted (panda--environment-history-fetch (or env-id
-                                                               )))
-         (environment-name (panda--env-name-from-id env-id))
-         (buffer-name (format (panda--get-buffer-name 'env-history) environment-name))
+  (let* ((environment (panda--select-environment project-name env-name))
+         (data-formatted (panda--environment-history-fetch (panda--environment-id environment)))
+         (buffer-name (format (panda--get-buffer-name 'env-history)
+                              (panda--environment-name environment)))
          (buffer (get-buffer-create buffer-name)))
     (with-current-buffer buffer
       (panda--environment-history-mode)
@@ -711,10 +705,8 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
 (defun panda--deploy-results-history ()
   "Show the selected environment's history in `panda--deploy-results-mode'."
   (interactive)
-  (panda-environment-history
-   (seq-find (lambda (env) (string= (panda--environment-name env)
-                                    (tabulated-list-get-id)))
-             (panda--deploy-project-environments panda--current-deploy-project))))
+  (panda-environment-history (panda--deploy-project-name panda--current-deploy-project)
+                             (tabulated-list-get-id)))
 
 (defun panda--deploy-results-log ()
   "Show the log for the last (or running) deploy in `panda--deploy-results-mode'."

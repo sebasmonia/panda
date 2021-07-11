@@ -192,25 +192,22 @@ Return a `panda--deploy-project'."
                                 (panda--deploy-project-name a-proj)))
               panda--deploys-cache)))
 
-(defun panda--select-environment (&optional deploy-project-name env-name env-id)
-  "Find an environment from a DEPLOY-PROJECT-NAME, using its ENV-NAME or ENV-ID.
-If some parameters are missing, use `completing-read' to select interactively."
+(defun panda--select-environment (&optional deploy-project-name env-name)
+  "Find an environment from a DEPLOY-PROJECT-NAME, using its ENV-NAME.
+If parameters are missing, use `completing-read' to select interactively."
   (let* ((deploy-project (panda--select-deploy-project deploy-project-name))
          (depproj-environments (panda--deploy-project-environments deploy-project)))
-    (if env-id
-        ;; search by id, should be direct
-        (seq-find (lambda (an-env) (= env-id
-                                      (panda--environment-id an-env)))
-                  (panda--deploy-project-environments deploy-proj))
-      ;;the id wasn't provided, try by name, use completing-read if needed
-      (panda--depproj-env-by-name deploy-project
-                                  (or env-name
-                                      (completing-read "Select an environment: "
-                                                       (mapcar #'panda--environment-name
-                                                               depproj-environments)))))))
+    (unless env-name
+      (setq env-name (completing-read "Select an environment: "
+                                      (mapcar #'panda--environment-name
+                                              depproj-environments))))
+    (seq-find (lambda (an-env) (string=
+                                env-name
+                                (panda--environment-name an-env)))
+              depproj-environments)))
 
 (defun panda--depproj-env-by-name (deploy-proj env-name)
-  "Return the environment id of ENV-NAME, an environment in DEPLOY-PROJ."
+  "Return the environment that matches of ENV-NAME, an environment in DEPLOY-PROJ."
   (seq-find (lambda (an-env) (string=
                               env-name
                               (panda--environment-name an-env)))
@@ -218,8 +215,8 @@ If some parameters are missing, use `completing-read' to select interactively."
 
 ;;-------------------API calls that don't use structs but need formatting---------
 
-(defun panda--deploys-for-id (did)
-  "Get the deployments of a DID (deployment id)."
+(defun panda--releases-for-did (did)
+  "Get the releases of a DID (deployment id)."
   (let* ((api-response (panda--api-call (format "/deploy/project/%s/versions" did )
                                         (format "max-results=%s" panda-latest-max-results))))
     (cl-loop for deploy across (gethash "versions" api-response)
