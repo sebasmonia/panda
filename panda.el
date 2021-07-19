@@ -547,7 +547,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
   (let* ((deploy-project (panda--select-deploy-project project-name))
          (release-data (panda--releases-for-did (panda--deploy-project-id deploy-project)))
          (release-name (completing-read "Select release: " release-data))
-         (environment (panda--select-environment project-name environment-name))
+         (environment (panda--select-environment (panda--deploy-project-name deploy-project) environment-name))
          (confirmed t)) ;; we'll check if there's a regex match later
     (when (not (string-empty-p panda-deploy-confirmation-regex))
       (if (string-match-p panda-deploy-confirmation-regex (panda--environment-name environment))
