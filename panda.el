@@ -616,6 +616,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                     (or .master.key ;; for branches this will be non-empty
                         .plan.key)))))) ;; if we get here this is a base plan
 
+;;;###autoload
 (define-derived-mode panda--build-results-mode tabulated-list-mode "Panda build results view" "Major mode to display Bamboo's build results."
   (setq tabulated-list-format [("Build key" 20 nil)
                                ("State" 11 nil)
@@ -881,6 +882,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
   (cadar (cl-remove-if-not (lambda (env) (string= env-name (car env)))
                            (panda--all-environments))))
 
+;;;###autoload
 (define-derived-mode panda--environment-history-mode tabulated-list-mode "Panda environment history view" "Major mode to display Bamboo's environment history."
   (setq tabulated-list-format [("State" 12 nil)
                                ("Status" 8)
@@ -915,6 +917,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                     "")
                   (or .deploymentResult.deploymentVersion.name "")))))
 
+;;;###autoload
 (define-derived-mode panda--deploy-results-mode tabulated-list-mode "Panda deploy results view" "Major mode to display Bamboo's deploy results."
   (setq tabulated-list-format [("Environment" 45 nil)
                                ("State" 12 nil)
