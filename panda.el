@@ -544,6 +544,7 @@ If provided PROJECT and PLAN won't be prompted."
                                            (alist-get 'unstyledLog log-entry)))
                .logEntries.logEntry "\n")))
 
+;;;###autoload
 (defun panda-queue-build (&optional plan)
   "Queue a build.  If PLAN is not provided, select it interactively."
   (interactive)
@@ -560,6 +561,7 @@ If provided PROJECT and PLAN won't be prompted."
           (panda-build-results-branch branch-key)
         (panda--message "Build queued")))))
 
+;;;###autoload
 (defun panda-build-results (&optional plan)
   "Fetch the build results for a branch under PLAN.
 If PLAN is not provided, select it interactively.
@@ -616,7 +618,6 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                     (or .master.key ;; for branches this will be non-empty
                         .plan.key)))))) ;; if we get here this is a base plan
 
-;;;###autoload
 (define-derived-mode panda--build-results-mode tabulated-list-mode "Panda build results view" "Major mode to display Bamboo's build results."
   (setq tabulated-list-format [("Build key" 20 nil)
                                ("State" 11 nil)
@@ -678,6 +679,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
 
 ;;------------------Creating deployments and pushing them-------------------------
 
+;;;###autoload
 (defun panda-create-release ()
   "Create a new release from a succesful build."
   (interactive)
@@ -733,6 +735,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
   (alist-get 'nextVersionName (panda--api-call (format "/deploy/projectVersioning/%s/nextVersion" did)
                                                (concat "resultKey=" build-key))))
 
+;;;###autoload
 (defun panda-queue-deploy (&optional project environment)
   "Queue a deploy.  If PROJECT and ENVIRONMENT are not provided, select them interactively."
   (interactive)
@@ -783,6 +786,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
      (lambda (dep) (let-alist dep (list .name .id)))
      deploys)))
 
+;;;###autoload
 (defun panda-deploy-status (&optional project)
   "Display a project's deploy status.  If PROJECT is not provided, select it interactively."
   (interactive)
@@ -805,6 +809,7 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
       (switch-to-buffer buffer))
     (panda--message (concat "Listing deploy status for " project-name ". Press ? for help and bindings available."))))
 
+;;;###autoload
 (defun panda-environment-history (&optional env-id)
   "Show the history of ENV-ID in a new buffer.  If env-id is not provided, it will be prompted."
   (interactive)
@@ -882,7 +887,6 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
   (cadar (cl-remove-if-not (lambda (env) (string= env-name (car env)))
                            (panda--all-environments))))
 
-;;;###autoload
 (define-derived-mode panda--environment-history-mode tabulated-list-mode "Panda environment history view" "Major mode to display Bamboo's environment history."
   (setq tabulated-list-format [("State" 12 nil)
                                ("Status" 8)
@@ -917,7 +921,6 @@ The amount of builds to retrieve is controlled by 'panda-latest-max'."
                     "")
                   (or .deploymentResult.deploymentVersion.name "")))))
 
-;;;###autoload
 (define-derived-mode panda--deploy-results-mode tabulated-list-mode "Panda deploy results view" "Major mode to display Bamboo's deploy results."
   (setq tabulated-list-format [("Environment" 45 nil)
                                ("State" 12 nil)
